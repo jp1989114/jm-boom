@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6 项已修复，其余 44 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6、7 项已修复，其余 43 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -44,7 +44,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   已修复：待保存进度只在对应请求成功后清除；普通保存请求串行执行，期间仅保留最新进度。可重试错误按 5、10、20、30 秒退避，之后间隔上限为 30 秒；不可重试的 API 错误不自动循环重试。重试沿用阅读事件的时间戳，并用请求/记录身份避免旧响应清除新进度。pagehide 与卸载使用 keepalive 补写，重复补写去重；卸载后停止后台重试，不增加浏览器持久化历史。
 
-  验证：与第 06 项共新增 10 个实际 React 挂载测试，覆盖失败后不翻页也重试、退避上限、永久错误、连续翻页合并、旧请求成功/失败、keepalive、卸载、跨章节响应和 Strict Mode。测试环境通过开发依赖 happy-dom 提供，前端共 20 个测试通过。
+  验证：与第 06 项共新增 10 个实际 React 挂载测试，覆盖失败后不翻页也重试、退避上限、永久错误、连续翻页合并、旧请求成功/失败、keepalive、卸载、跨章节响应和 Strict Mode。测试环境通过开发依赖 happy-dom 提供，相关测试已通过，最新测试统计见文末。
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:72](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:72)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:122](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:122)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:138](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:138)。
 
@@ -56,17 +56,19 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:90](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:90)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:101](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:101)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:240](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:240)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:250](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:250)。
 
-- [ ] **07 · P2 · 共享收藏列表沿用静态内容的缓存策略，跨设备变更长期不可见**
+- [x] **07 · P2 · 共享收藏列表沿用静态内容的缓存策略，跨设备变更长期不可见（已修复）**
 
-  收藏查询没有覆盖全局 `refetchOnMount: false` 和 `refetchOnWindowFocus: false`。其他设备修改收藏后，本设备返回收藏页或重新聚焦都不刷新；频繁回访还会延长缓存驻留。应像书架的共享状态查询一样配置合适的刷新时机。
+  已修复：收藏查询单独设置 `staleTime: 10_000`、`refetchOnMount: true` 和 `refetchOnWindowFocus: true`。缓存过期后，重新进入收藏页或切回窗口会重新查询；本地收藏操作主动使查询失效后，返回页面也会刷新。未过期缓存继续复用，过期时间本身不会触发轮询。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26)；[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33)。
+  验证：新增 4 个实际页面挂载回归测试，覆盖过期缓存进入页面、未挂载列表被收藏 mutation 失效后返回、过期列表重新聚焦，以及未过期缓存复用。旧代码在 3 个刷新场景中未发出请求，修复后 4 个测试全部通过。测试文件使用 TanStack Router 的忽略前缀，不会生成额外路由。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26)；[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33)；[E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:102](E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:102)。
 
 - [ ] **08 · P2 · 收藏总页数减少后没有修正当前页**
 
   收藏页只计算 `pageCount`，没有书架已有的页码收敛处理。当前停在第 2 页、更新后总数变为 20 时，会显示空列表并隐藏分页器，实际第 1 页仍有收藏。应在有效列表响应后把当前页收敛到存在的页。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:44](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:44)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:79](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:79)。
+  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:47](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:47)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:79](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:79)。
 
 - [ ] **09 · P2 · 详情状态查询失败被当成“未收藏、无阅读历史”**
 
@@ -343,15 +345,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 05、06 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 07 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 127 个现有 CRLF 源码文件仍被报告。本次修改的 hook 和新增测试文件已统一为 LF，单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 126 个现有 CRLF 源码文件仍被报告。本次修改的收藏页和新增测试文件已统一为 LF，单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 20 个测试通过，含第 05、06 项新增的 10 个 React 挂载回归测试 |
+| web：bun test | 24 个测试通过，含第 05、06 项的 10 个和第 07 项新增的 4 个 React 挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -367,4 +369,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 6 条已修复、44 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 7 条已修复、43 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。

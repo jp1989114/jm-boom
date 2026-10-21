@@ -25,7 +25,10 @@ function FavoritesPage() {
   const [page, setPage] = useState(1)
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: queryKeys.favorites(page),
-    queryFn: () => listFavorites(page)
+    queryFn: () => listFavorites(page),
+    staleTime: 10_000,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true
   })
   const { mutate: clear, isPending: isClearing } = useMutation({
     mutationFn: clearFavorites,
