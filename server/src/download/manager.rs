@@ -339,6 +339,7 @@ mod tests {
         page_materializer::PageMaterializer,
         reader::PageImageFormat,
     };
+    use axum::response::IntoResponse;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
     use std::{
         future::{poll_fn, Future},
@@ -354,7 +355,7 @@ mod tests {
     };
     use tokio::{
         fs,
-        sync::{watch, Semaphore},
+        sync::{watch, Notify, Semaphore},
         time::timeout,
     };
 
@@ -709,6 +710,134 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelling_slow_upstream_requests_releases_workers() {
+        for phase in ["chapter", "setting", "image"] {
+            for operation in ["pause", "cancel", "remove"] {
+                let (endpoint, started, release, server) = slow_upstream(phase).await;
+                let db = test_db().await;
+                sqlx::query("INSERT INTO app_settings (key, value, updated_at) VALUES ('endpoint_selected', ?, 0)")
+                    .bind(&endpoint).execute(&db).await.unwrap();
+                let (manager, root) = test_manager("slow-upstream", db.clone()).await;
+                let task = test_task("task-slow", DownloadStatus::Queued, 1);
+                insert_task(&manager, task).await;
+                manager.task_semaphore.add_permits(1);
+                manager.spawn("task-slow".into());
+                timeout(Duration::from_secs(1), started.notified())
+                    .await
+                    .expect("upstream request should start");
+
+                timeout(Duration::from_secs(1), async {
+                    match operation {
+                        "pause" => manager.pause("task-slow").await,
+                        "cancel" => manager.cancel("task-slow").await,
+                        _ => manager.remove("task-slow").await,
+                    }
+                })
+                .await
+                .expect("management operation must not wait for upstream")
+                .expect("stop slow task");
+                wait_for_worker(&manager, "task-slow", false).await;
+                assert_eq!(manager.task_semaphore.available_permits(), 1);
+                assert_eq!(manager.endpoints.state().await.current_endpoint, endpoint);
+
+                if operation != "remove" {
+                    let stopped = task_snapshot(&manager, "task-slow").await;
+                    assert_eq!(
+                        stopped.status,
+                        if operation == "pause" {
+                            DownloadStatus::Paused
+                        } else {
+                            DownloadStatus::Cancelled
+                        }
+                    );
+                    assert!(stopped.error.is_none());
+                    if operation == "pause" {
+                        manager.resume("task-slow").await.unwrap();
+                        timeout(Duration::from_secs(1), started.notified())
+                            .await
+                            .expect("resumed worker should start a new request");
+                        assert_eq!(task_snapshot(&manager, "task-slow").await.generation, 2);
+                    }
+                    timeout(Duration::from_secs(1), manager.remove("task-slow"))
+                        .await
+                        .expect("delete task without waiting for slow upstream")
+                        .unwrap();
+                }
+
+                assert_task_removed(&manager, "task-slow").await;
+                assert_eq!(manager.task_semaphore.available_permits(), 1);
+                let manifests: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM download_manifests WHERE task_id = 'task-slow'",
+                )
+                .fetch_one(&db)
+                .await
+                .unwrap();
+                assert_eq!(manifests, 0);
+                assert!(!fs::try_exists(root.join("downloads/task-slow"))
+                    .await
+                    .unwrap());
+                release.add_permits(1);
+                server.abort();
+                let _ = server.await;
+                cleanup(manager, root).await;
+            }
+        }
+    }
+
+    async fn slow_upstream(
+        phase: &'static str,
+    ) -> (
+        String,
+        Arc<Notify>,
+        Arc<Semaphore>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Semaphore::new(0));
+        let app = axum::Router::new().fallback({
+            let endpoint = endpoint.clone();
+            let started = started.clone();
+            let release = release.clone();
+            move |uri: axum::http::Uri| {
+                let endpoint = endpoint.clone();
+                let started = started.clone();
+                let release = release.clone();
+                async move {
+                    let stage = match uri.path() {
+                        "/chapter" => "chapter",
+                        "/setting" => "setting",
+                        _ => "image",
+                    };
+                    if stage == phase {
+                        started.notify_one();
+                        let _permit = release.acquire().await.unwrap();
+                    }
+                    match stage {
+                        "chapter" => {
+                            axum::Json(serde_json::json!({"images": ["001.png"]})).into_response()
+                        }
+                        "setting" => axum::Json(
+                            serde_json::json!({"code": 200, "data": {"img_host": endpoint}}),
+                        )
+                        .into_response(),
+                        _ => (
+                            [(axum::http::header::CONTENT_TYPE, "image/png")],
+                            png_data(),
+                        )
+                            .into_response(),
+                    }
+                }
+            }
+        });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (endpoint, started, release, server)
+    }
+
+    #[tokio::test]
     async fn offline_page_falls_back_from_corrupt_newer_download_and_expires_after_delete() {
         let db = test_db().await;
         let (manager, root) = test_manager("offline-fallback", db).await;
@@ -841,7 +970,13 @@ mod tests {
                 .await
                 .expect("create endpoint manager"),
         );
-        let jm = Arc::new(JmClient::new().expect("create JM client"));
+        let mut jm = JmClient::new().expect("create JM client");
+        jm.client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let jm = Arc::new(jm);
         let page_materializer = Arc::new(PageMaterializer::new(
             jm.clone(),
             endpoints.clone(),

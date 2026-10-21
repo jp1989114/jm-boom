@@ -1,5 +1,6 @@
 use super::{
-    manager::DownloadManager, DownloadError, DownloadResult, DOWNLOAD_PAGE_CONCURRENCY_PER_TASK,
+    manager::DownloadManager, scheduler::wait_for_cancel, DownloadError, DownloadResult,
+    DOWNLOAD_PAGE_CONCURRENCY_PER_TASK,
 };
 use crate::{
     image_work::ImageWorkPriority,
@@ -38,6 +39,7 @@ impl DownloadManager {
             generation,
             cancelled: cancelled.clone(),
         };
+        let mut chapter_cancelled = cancelled.clone();
         let started = Instant::now();
         let mut downloaded_bytes = 0u64;
         let mut resolved_chapters = Vec::with_capacity(chapters.len());
@@ -49,12 +51,14 @@ impl DownloadManager {
             self.update_chapter(task_id, generation, &chapter_request.title)
                 .await?;
             let request_chapter_id = chapter_request.chapter_id.clone();
-            let (_, chapter) = self
-                .jm_request(move |client, endpoint| {
+            let (_, chapter) = tokio::select! {
+                biased;
+                _ = wait_for_cancel(&mut chapter_cancelled) => return Ok(()),
+                result = self.jm_request(move |client, endpoint| {
                     let chapter_id = request_chapter_id.clone();
                     Box::pin(async move { client.get_chapter(endpoint, &chapter_id).await })
-                })
-                .await?;
+                }) => result?,
+            };
             if !self.is_context_active(&context).await {
                 return Ok(());
             }
@@ -84,9 +88,13 @@ impl DownloadManager {
             let mut jobs = JoinSet::new();
             let mut next_page = 0usize;
 
-            while next_page < chapter.images.len() || !jobs.is_empty() {
+            // Stop queuing pages on cancellation, but let in-flight jobs finish safely.
+            while (next_page < chapter.images.len() && !*context.cancelled.borrow())
+                || !jobs.is_empty()
+            {
                 while next_page < chapter.images.len()
                     && jobs.len() < DOWNLOAD_PAGE_CONCURRENCY_PER_TASK
+                    && !*context.cancelled.borrow()
                 {
                     let manager = self.clone();
                     let context = context.clone();

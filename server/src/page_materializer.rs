@@ -142,7 +142,11 @@ impl PageMaterializer {
         let image_path = match request.image_path {
             Some(image_path) => image_path,
             None => {
-                let chapter = self.source.get_chapter(request.chapter_id).await?;
+                let chapter = await_source(
+                    self.source.get_chapter(request.chapter_id),
+                    request.cancelled.as_mut(),
+                )
+                .await?;
                 owned_image_path = chapter
                     .images
                     .get(request.page)
@@ -181,10 +185,12 @@ impl PageMaterializer {
             return Err(PageMaterializeError::Cancelled);
         }
 
-        let image_data = self
-            .source
-            .download_page_image(request.chapter_id, image_path)
-            .await?;
+        let image_data = await_source(
+            self.source
+                .download_page_image(request.chapter_id, image_path),
+            request.cancelled.as_mut(),
+        )
+        .await?;
         if request
             .cancelled
             .as_ref()
@@ -256,6 +262,21 @@ impl PageMaterializer {
             },
             None => Ok(self.image_work.acquire_decode(priority).await),
         }
+    }
+}
+
+// Only source requests are interrupted; decoding and cache commits retain their guards.
+async fn await_source<T>(
+    future: PageSourceFuture<'_, T>,
+    cancelled: Option<&mut watch::Receiver<bool>>,
+) -> Result<T, PageMaterializeError> {
+    match cancelled {
+        Some(cancelled) => tokio::select! {
+            biased;
+            _ = wait_for_cancel(cancelled) => Err(PageMaterializeError::Cancelled),
+            result = future => result.map_err(PageMaterializeError::Upstream),
+        },
+        None => future.await.map_err(PageMaterializeError::Upstream),
     }
 }
 
@@ -343,7 +364,12 @@ mod tests {
         },
         time::Duration,
     };
-    use tokio::{fs, sync::watch, task::JoinSet, time::timeout};
+    use tokio::{
+        fs,
+        sync::{watch, Semaphore},
+        task::JoinSet,
+        time::timeout,
+    };
 
     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -354,9 +380,12 @@ mod tests {
         download_count: AtomicUsize,
         active_downloads: AtomicUsize,
         max_active_downloads: AtomicUsize,
+        active_chapters: AtomicUsize,
+        chapter_gate: Option<Arc<Semaphore>>,
+        download_gate: Option<Arc<Semaphore>>,
     }
 
-    struct ActiveDownload<'a> {
+    struct ActiveRequest<'a> {
         counter: &'a AtomicUsize,
     }
 
@@ -369,6 +398,9 @@ mod tests {
                 download_count: AtomicUsize::new(0),
                 active_downloads: AtomicUsize::new(0),
                 max_active_downloads: AtomicUsize::new(0),
+                active_chapters: AtomicUsize::new(0),
+                chapter_gate: None,
+                download_gate: None,
             }
         }
 
@@ -385,7 +417,7 @@ mod tests {
         }
     }
 
-    impl Drop for ActiveDownload<'_> {
+    impl Drop for ActiveRequest<'_> {
         fn drop(&mut self) {
             self.counter.fetch_sub(1, Ordering::SeqCst);
         }
@@ -394,6 +426,13 @@ mod tests {
     impl PageSource for TestPageSource {
         fn get_chapter<'a>(&'a self, chapter_id: &'a str) -> PageSourceFuture<'a, ChapterManifest> {
             Box::pin(async move {
+                self.active_chapters.fetch_add(1, Ordering::SeqCst);
+                let _active = ActiveRequest {
+                    counter: &self.active_chapters,
+                };
+                if let Some(gate) = &self.chapter_gate {
+                    let _permit = gate.acquire().await.unwrap();
+                }
                 Ok(ChapterManifest {
                     id: chapter_id.to_string(),
                     images: vec!["001.png".into(), "002.png".into()],
@@ -411,10 +450,13 @@ mod tests {
                 let active = self.active_downloads.fetch_add(1, Ordering::SeqCst) + 1;
                 self.max_active_downloads
                     .fetch_max(active, Ordering::SeqCst);
-                let _active = ActiveDownload {
+                let _active = ActiveRequest {
                     counter: &self.active_downloads,
                 };
 
+                if let Some(gate) = &self.download_gate {
+                    let _permit = gate.acquire().await.unwrap();
+                }
                 if !self.delay.is_zero() {
                     tokio::time::sleep(self.delay).await;
                 }
@@ -653,6 +695,115 @@ mod tests {
             1
         );
 
+        cleanup(materializer, cache, root).await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_chapter_request_releases_the_page_lock() {
+        let gate = Arc::new(Semaphore::new(0));
+        let mut source = TestPageSource::new(png_data(), Duration::ZERO, 0);
+        source.chapter_gate = Some(gate.clone());
+        let source = Arc::new(source);
+        let (materializer, cache, root) = test_materializer("cancel-chapter", source.clone()).await;
+        let (cancel, cancelled) = watch::channel(false);
+        let owner = tokio::spawn({
+            let materializer = materializer.clone();
+            async move {
+                let mut request = test_request("chapter-cancel-source", 0, "001.png");
+                request.image_path = None;
+                request.cancelled = Some(cancelled);
+                materializer.materialize(request).await
+            }
+        });
+        timeout(Duration::from_secs(1), async {
+            while source.active_chapters.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("chapter request should start");
+        cancel.send(true).unwrap();
+        let result = timeout(Duration::from_secs(1), owner)
+            .await
+            .expect("chapter cancellation must not wait for upstream")
+            .unwrap();
+        assert!(matches!(result, Err(PageMaterializeError::Cancelled)));
+        assert_eq!(source.active_chapters.load(Ordering::SeqCst), 0);
+        assert_eq!(source.download_count(), 0);
+        assert_eq!(cache.stats().await.unwrap().entry_count, 0);
+
+        gate.add_permits(1);
+        let mut reader = test_request("chapter-cancel-source", 0, "001.png");
+        reader.image_path = None;
+        timeout(Duration::from_secs(1), materializer.materialize(reader))
+            .await
+            .expect("reader must be able to acquire the released page lock")
+            .expect("reader should retry the chapter request");
+        assert_eq!(source.download_count(), 1);
+        cleanup(materializer, cache, root).await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_image_owner_releases_budgets_and_allows_reader_retry() {
+        let gate = Arc::new(Semaphore::new(0));
+        let mut source = TestPageSource::new(png_data(), Duration::ZERO, 0);
+        source.download_gate = Some(gate.clone());
+        let source = Arc::new(source);
+        let (materializer, cache, root) = test_materializer_with_budget(
+            "cancel-image-owner",
+            source.clone(),
+            ImageWorkBudget::new_for_test(1, 1),
+        )
+        .await;
+        let (cancel, cancelled) = watch::channel(false);
+        let owner = tokio::spawn({
+            let materializer = materializer.clone();
+            async move {
+                let mut request = test_request("chapter-cancel-image-owner", 0, "001.png");
+                request.comic_id = 500_000;
+                request.priority = ImageWorkPriority::Download;
+                request.cancelled = Some(cancelled);
+                materializer.materialize(request).await
+            }
+        });
+        wait_for_active_download(&source).await;
+        let reader = tokio::spawn({
+            let materializer = materializer.clone();
+            async move {
+                let mut request = test_request("chapter-cancel-image-owner", 0, "001.png");
+                request.comic_id = 500_000;
+                materializer.materialize(request).await
+            }
+        });
+        cancel.send(true).unwrap();
+        let result = timeout(Duration::from_secs(1), owner)
+            .await
+            .expect("image cancellation must not wait for upstream")
+            .unwrap();
+        assert!(matches!(result, Err(PageMaterializeError::Cancelled)));
+        timeout(Duration::from_secs(1), async {
+            while source.download_count() < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("reader must acquire the released page lock and work budgets");
+        assert_eq!(source.active_downloads(), 1);
+        assert_eq!(source.max_active_downloads(), 1);
+        assert_eq!(cache.stats().await.unwrap().entry_count, 0);
+
+        gate.add_permits(1);
+        let page = timeout(Duration::from_secs(1), reader)
+            .await
+            .expect("reader should finish independently of the cancelled owner")
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.format, PageImageFormat::WebP);
+        assert!(page.format.is_complete(&page.data));
+        assert_eq!(cache.stats().await.unwrap().entry_count, 1);
+        assert!(!cache_files(&root.join("cache"))
+            .iter()
+            .any(|path| path.to_string_lossy().contains(".tmp-")));
         cleanup(materializer, cache, root).await;
     }
 

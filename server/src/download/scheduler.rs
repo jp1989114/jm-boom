@@ -111,7 +111,7 @@ impl DownloadManager {
     }
 }
 
-async fn wait_for_cancel(cancelled: &mut watch::Receiver<bool>) {
+pub(super) async fn wait_for_cancel(cancelled: &mut watch::Receiver<bool>) {
     if *cancelled.borrow() {
         return;
     }
