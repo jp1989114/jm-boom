@@ -2,9 +2,24 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import { HISTORY, READER } from '@/lib/constants'
+import { ApiError } from '@/lib/api/client'
 import type { ComicStateResult } from '@/lib/api/comic'
 import { upsertReadingHistory, type ReadingHistoryItem } from '@/lib/api/history'
 import { queryKeys } from '@/lib/query-keys'
+
+const MAX_RETRY_DELAY = 30_000
+// Keep reading events ordered across chapter sessions, even within the same millisecond.
+let lastHistoryTimestamp = 0
+
+interface HistorySyncState {
+  pending: ReadingHistoryItem | null
+  request: { item: ReadingHistoryItem; keepalive: boolean } | null
+  timer: number | undefined
+  active: boolean
+  nextAttemptAt: number
+  retryDelay: number
+  retryAllowed: boolean
+}
 
 interface UseReaderHistorySyncProps {
   comicId: string
@@ -28,8 +43,15 @@ export function useReaderHistorySync({
   pageCount
 }: UseReaderHistorySyncProps) {
   const queryClient = useQueryClient()
-  const pendingHistoryRef = useRef<Omit<ReadingHistoryItem, 'lastReadAt'> | null>(null)
-  const lastPersistedAtRef = useRef(0)
+  const syncRef = useRef<HistorySyncState>({
+    pending: null,
+    request: null,
+    timer: undefined,
+    active: false,
+    nextAttemptAt: 0,
+    retryDelay: HISTORY.PERSIST_INTERVAL,
+    retryAllowed: true
+  })
   const historyItem = useMemo(
     () =>
       comicId && pageCount > 0
@@ -48,52 +70,82 @@ export function useReaderHistorySync({
   )
 
   const flushPendingHistory = useCallback(
-    (keepalive = false) => {
-      const pendingHistory = pendingHistoryRef.current
-
-      if (!pendingHistory) {
+    async (keepalive = false): Promise<void> => {
+      const state = syncRef.current
+      const item = state.pending
+      if (
+        !item ||
+        !state.retryAllowed ||
+        (state.request && (!keepalive || (state.request.keepalive && state.request.item === item)))
+      ) {
         return
       }
 
-      pendingHistoryRef.current = null
-      const lastReadAt = Date.now()
-      lastPersistedAtRef.current = lastReadAt
-      const nextItem = { ...pendingHistory, lastReadAt }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.readingHistory() })
-      queryClient.setQueryData<ComicStateResult>(queryKeys.comicState(nextItem.id), current =>
-        current ? { ...current, history: nextItem } : current
-      )
-      void upsertReadingHistory(nextItem, keepalive)
-        .catch(error => {
-          if (import.meta.env.DEV) {
-            console.debug('Reading history sync failed', error)
+      const request = { item, keepalive }
+      state.request = request
+      state.nextAttemptAt = Date.now() + HISTORY.PERSIST_INTERVAL
+      scheduleHistoryFlush(state, flushPendingHistory)
+
+      try {
+        await upsertReadingHistory(item, keepalive)
+        if (state.pending === item) {
+          state.pending = null
+          state.retryDelay = HISTORY.PERSIST_INTERVAL
+        }
+        queryClient.setQueryData<ComicStateResult>(queryKeys.comicState(item.id), current => {
+          if (!current || (current.history && current.history.lastReadAt > item.lastReadAt)) {
+            return current
           }
+          return { ...current, history: item }
         })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.readingHistory() })
+      } catch (error) {
+        if (state.pending === item) {
+          state.retryAllowed = !(error instanceof ApiError) || error.retryable
+          state.nextAttemptAt = Date.now() + state.retryDelay
+          state.retryDelay = Math.min(state.retryDelay * 2, MAX_RETRY_DELAY)
+        }
+        if (import.meta.env.DEV) {
+          console.debug('Reading history sync failed', error)
+        }
+      } finally {
+        if (state.request === request) state.request = null
+        scheduleHistoryFlush(state, flushPendingHistory)
+      }
     },
     [queryClient]
   )
 
   useEffect(() => {
-    pendingHistoryRef.current = historyItem
-
-    if (!historyItem) {
-      return
-    }
-
-    const elapsed = Date.now() - lastPersistedAtRef.current
-    const delay = Math.max(HISTORY.PERSIST_INTERVAL - elapsed, 0)
-    const timeout = window.setTimeout(flushPendingHistory, delay)
-
-    return () => window.clearTimeout(timeout)
+    if (!historyItem) return
+    const state = syncRef.current
+    lastHistoryTimestamp = Math.max(Date.now(), lastHistoryTimestamp + 1)
+    state.pending = { ...historyItem, lastReadAt: lastHistoryTimestamp }
+    state.retryDelay = HISTORY.PERSIST_INTERVAL
+    state.retryAllowed = true
+    state.nextAttemptAt = Math.min(state.nextAttemptAt, Date.now() + HISTORY.PERSIST_INTERVAL)
+    scheduleHistoryFlush(state, flushPendingHistory)
   }, [flushPendingHistory, historyItem])
 
   useEffect(() => {
-    const handlePageHide = () => flushPendingHistory(true)
+    const state = syncRef.current
+    state.active = true
+    scheduleHistoryFlush(state, flushPendingHistory)
+    const handlePageHide = () => void flushPendingHistory(true)
     window.addEventListener('pagehide', handlePageHide)
 
     return () => {
+      state.active = false
       window.removeEventListener('pagehide', handlePageHide)
-      flushPendingHistory()
+      scheduleHistoryFlush(state, flushPendingHistory)
+      void flushPendingHistory(true)
     }
   }, [flushPendingHistory])
+}
+
+function scheduleHistoryFlush(state: HistorySyncState, flush: () => Promise<void>) {
+  window.clearTimeout(state.timer)
+  state.timer = undefined
+  if (!state.active || !state.pending || state.request || !state.retryAllowed) return
+  state.timer = window.setTimeout(() => void flush(), Math.max(state.nextAttemptAt - Date.now(), 0))
 }

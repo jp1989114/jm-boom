@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4 项已修复，其余 46 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6 项已修复，其余 44 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -40,17 +40,21 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:125](E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:125)；[E:/ppxb/jm-boom/server/src/download/manager.rs:272](E:/ppxb/jm-boom/server/src/download/manager.rs:272)；[E:/ppxb/jm-boom/server/src/download/manager.rs:423](E:/ppxb/jm-boom/server/src/download/manager.rs:423)；[E:/ppxb/jm-boom/server/src/download/manager.rs:454](E:/ppxb/jm-boom/server/src/download/manager.rs:454)。
 
-- [ ] **05 · P2 · 阅读进度保存失败后丢失待保存记录**
+- [x] **05 · P2 · 阅读进度保存失败后丢失待保存记录（已修复）**
 
-  `flushPendingHistory` 在请求成功前清空 `pendingHistoryRef` 并更新时间；失败仅在开发环境输出日志，不恢复 pending。用户停留在当前页时不会再有状态变化触发保存。应保留最新未确认进度，在失败后可重新提交，同时避免旧失败覆盖更新的进度。
+  已修复：待保存进度只在对应请求成功后清除；普通保存请求串行执行，期间仅保留最新进度。可重试错误按 5、10、20、30 秒退避，之后间隔上限为 30 秒；不可重试的 API 错误不自动循环重试。重试沿用阅读事件的时间戳，并用请求/记录身份避免旧响应清除新进度。pagehide 与卸载使用 keepalive 补写，重复补写去重；卸载后停止后台重试，不增加浏览器持久化历史。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:48](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:48)。
+  验证：与第 06 项共新增 10 个实际 React 挂载测试，覆盖失败后不翻页也重试、退避上限、永久错误、连续翻页合并、旧请求成功/失败、keepalive、卸载、跨章节响应和 Strict Mode。测试环境通过开发依赖 happy-dom 提供，前端共 20 个测试通过。
 
-- [ ] **06 · P2 · 阅读历史在服务端提交前失效，返回书架时可能读到旧记录**
+  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:72](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:72)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:122](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:122)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:138](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:138)。
 
-  进度同步先 `invalidateQueries(readingHistory)`，再启动 PUT。卸载阅读器并进入书架时，列表 GET 可能先于 PUT 完成，随后又没有成功后的失效通知。应在保存成功后更新或失效相关列表，卸载保存仍需保留当前 keepalive 场景。
+- [x] **06 · P2 · 阅读历史在服务端提交前失效，返回书架时可能读到旧记录（已修复）**
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:62](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:62)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33)。
+  已修复：等待 `upsertReadingHistory` 成功后再更新漫画状态缓存并使历史列表失效，避免在 PUT 提交前启动列表刷新。更新状态缓存时比较 lastReadAt，较旧章节请求的迟到响应不会覆盖已确认的新进度。
+
+  验证：实际 QueryClient 测试确认请求未成功时历史缓存不失效、漫画进度不提前更新；成功后才更新和失效，并覆盖旧章节响应晚于新章节完成的情况。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:90](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:90)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:101](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.ts:101)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:240](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:240)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:250](E:/ppxb/jm-boom/web/src/features/reader/use-reader-history-sync.test.tsx:250)。
 
 - [ ] **07 · P2 · 共享收藏列表沿用静态内容的缓存策略，跨设备变更长期不可见**
 
@@ -339,15 +343,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 4 项修复后重新执行了后端基线与 diff 检查。前端未改动，以下前端结果沿用初次审计记录。
+第 05、06 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：128 个文件被报告，工作区恰有 128 个 CRLF 源文件；抽样仅替换为 LF 后与格式化输出完全一致。Git 索引样本是 LF，core.autocrlf=true，不能据此断言 128 个文件都有源码风格问题。 |
+| web：bun run fmt:check | 未通过：其余 127 个现有 CRLF 源码文件仍被报告。本次修改的 hook 和新增测试文件已统一为 LF，单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 10 个测试通过 |
+| web：bun test | 20 个测试通过，含第 05、06 项新增的 10 个 React 挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -363,4 +367,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 4 条已修复、46 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 6 条已修复、44 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
