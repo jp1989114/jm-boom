@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6、7 项已修复，其余 43 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6、7、8 项已修复，其余 42 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -62,13 +62,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   验证：新增 4 个实际页面挂载回归测试，覆盖过期缓存进入页面、未挂载列表被收藏 mutation 失效后返回、过期列表重新聚焦，以及未过期缓存复用。旧代码在 3 个刷新场景中未发出请求，修复后 4 个测试全部通过。测试文件使用 TanStack Router 的忽略前缀，不会生成额外路由。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26)；[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33)；[E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:102](E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:102)。
+  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:26)；[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:33)；[E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:169](E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:169)。
 
-- [ ] **08 · P2 · 收藏总页数减少后没有修正当前页**
+- [x] **08 · P2 · 收藏总页数减少后没有修正当前页（已修复）**
 
-  收藏页只计算 `pageCount`，没有书架已有的页码收敛处理。当前停在第 2 页、更新后总数变为 20 时，会显示空列表并隐藏分页器，实际第 1 页仍有收藏。应在有效列表响应后把当前页收敛到存在的页。
+  已修复：收藏页根据已有有效响应计算至少为 1 的总页数；当前页越界时，使最后有效页的缓存失效并切换到该页，确保取得最新列表和总数。列表清空时保持第 1 页，不会请求第 0 页；响应尚未返回时不使用缺失总数重置页码，首次请求失败后仍可重试原页。分页器继续在不超过一页时隐藏。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:47](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:47)；[E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:79](E:/ppxb/jm-boom/web/src/routes/_app/bookshelf.tsx:79)。
+  验证：新增 5 个实际页面回归测试，覆盖 21 条减至 20 条、81 条减至 41 条、远端清空、延迟响应和请求失败后重试。3 个缩页场景在旧代码上失败，修复后全部通过，并验证目标页已有新鲜缓存时仍重新请求、显示正确漫画及分页器状态。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:49](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:49)；[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:51](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:51)；[E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:212](E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:212)；[E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:248](E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:248)。
 
 - [ ] **09 · P2 · 详情状态查询失败被当成“未收藏、无阅读历史”**
 
@@ -345,15 +347,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 07 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 08 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 126 个现有 CRLF 源码文件仍被报告。本次修改的收藏页和新增测试文件已统一为 LF，单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 126 个现有 CRLF 源码文件仍被报告。本次修改的收藏页和测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 24 个测试通过，含第 05、06 项的 10 个和第 07 项新增的 4 个 React 挂载回归测试 |
+| web：bun test | 29 个测试通过，含第 05、06 项的 10 个、第 07 项的 4 个和第 08 项新增的 5 个 React 挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -369,4 +371,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 7 条已修复、43 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 8 条已修复、42 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。

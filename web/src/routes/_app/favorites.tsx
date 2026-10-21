@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircleIcon, Trash2Icon } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { AppPage } from '@/components/app-page'
@@ -46,7 +46,13 @@ function FavoritesPage() {
   })
   const items = data?.items ?? []
   const total = data?.total ?? 0
-  const pageCount = Math.ceil(total / UI.COLLECTION_PAGE_SIZE)
+  const pageCount = Math.max(1, Math.ceil(total / UI.COLLECTION_PAGE_SIZE))
+
+  useEffect(() => {
+    if (!data || page <= pageCount) return
+    void queryClient.invalidateQueries({ queryKey: queryKeys.favorites(pageCount), exact: true })
+    setPage(pageCount)
+  }, [data, page, pageCount, queryClient])
 
   return (
     <AppPage>
