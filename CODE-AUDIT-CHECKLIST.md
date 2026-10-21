@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6、7、8 项已修复，其余 42 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6、7、8、9 项已修复，其余 41 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -72,11 +72,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:49](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:49)；[E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:51](E:/ppxb/jm-boom/web/src/routes/_app/favorites.tsx:51)；[E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:212](E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:212)；[E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:248](E:/ppxb/jm-boom/web/src/routes/_app/-favorites.test.tsx:248)。
 
-- [ ] **09 · P2 · 详情状态查询失败被当成“未收藏、无阅读历史”**
+- [x] **09 · P2 · 详情状态查询失败被当成“未收藏、无阅读历史”（已修复）**
 
-  详情页仅传递 `comicState.data` 和 `isLoading`；失败后 `isLoading` 为 false，收藏 hook 将 undefined 转为 false，界面还会启用操作。应区分“查询失败”与“明确未收藏”，提供状态重试并避免基于未知状态切换收藏。
+  已修复：详情页分别展示状态加载提示和失败重试入口。没有有效状态时，收藏状态保持 undefined、主阅读目标保持 null，桌面与移动端均显示未知状态并禁用相关操作；收藏回调也拒绝无状态提交。漫画资料与章节列表继续可用，未知阅读进度时不预热默认章节。有缓存的后台刷新失败则保留已有收藏状态和继续阅读位置，并提示正在显示上次记录。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:33](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:33)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:19](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:19)。
+  验证：新增 6 个实际 React 页面/Hook 回归测试，覆盖首次加载、首次失败、重试成功后恢复收藏与第 20 页阅读位置、后台失败保留缓存、确认未收藏后的添加操作，以及直接调用无状态收藏回调不发出写请求。测试同时检查移动端与桌面操作，并确认未知状态不请求默认章节 manifest。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:34](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:34)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:64](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:64)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:17](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:17)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:48](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:48)；[E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:107](E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:107)；[E:/ppxb/jm-boom/web/src/features/comic-detail/floating-actions.tsx:24](E:/ppxb/jm-boom/web/src/features/comic-detail/floating-actions.tsx:24)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-reader-preload.ts:12](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-reader-preload.ts:12)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.test.tsx:202](E:/ppxb/jm-boom/web/src/features/comic-detail/page.test.tsx:202)。
 
 - [ ] **10 · P2 · 账号表单在后台状态更新时覆盖用户未保存输入**
 
@@ -274,7 +276,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   推荐、排行、分区、搜索、每周列表重复声明完全相同的 staleTime/gcTime/refetch 配置；详情、评论、阅读器也重复 false 的 refetch 选项。删除相同字段，只保留与默认值不同的 TTL、retry、enabled、轮询和刷新设置。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/features/home/page.tsx:14](E:/ppxb/jm-boom/web/src/features/home/page.tsx:14)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40](E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:61](E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:61)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62](E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:32](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:32)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:25](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:25)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8](E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19](E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19)；[E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19](E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19)。
+  完整路径：[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/features/home/page.tsx:14](E:/ppxb/jm-boom/web/src/features/home/page.tsx:14)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40](E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:61](E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:61)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62](E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:32](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:32)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8](E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19](E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19)；[E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19](E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19)。
 
 - [ ] **42 · P3 · 阅读器会话同时依赖路由 key 重建和内部 scope 重置**
 
@@ -339,7 +341,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 | [E:/ppxb/jm-boom/web/src/features/reader/reader-settings-menu.tsx:199](E:/ppxb/jm-boom/web/src/features/reader/reader-settings-menu.tsx:199) | range input | 自绘浏览器皮肤与已有 Slider 重复，已列入 checklist。 |
 | [E:/ppxb/jm-boom/web/src/features/reader/reader-settings-menu.tsx:228](E:/ppxb/jm-boom/web/src/features/reader/reader-settings-menu.tsx:228) | button | 方向选择位于 Menu 内，语义和键盘遍历问题已列入 checklist。 |
 | [E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:236](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:236) | button | 重试按钮独立写边框、字号与 hover，可随阅读器按钮规格整理复用 Button；原生 button 本身有效。 |
-| [E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:172](E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:172) | button | 统计区的可点击评论块有专用布局和焦点样式；不应仅因原生标签要求替换。 |
+| [E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:179](E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:179) | button | 统计区的可点击评论块有专用布局和焦点样式；不应仅因原生标签要求替换。 |
 | [E:/ppxb/jm-boom/web/src/features/reader/reader-hot-zones.tsx:17](E:/ppxb/jm-boom/web/src/features/reader/reader-hot-zones.tsx:17) | 两个 button | 透明翻页热区有独立用途，不应强套普通 Button 的皮肤。 |
 | [E:/ppxb/jm-boom/web/src/components/ui/input.tsx:7](E:/ppxb/jm-boom/web/src/components/ui/input.tsx:7)、[E:/ppxb/jm-boom/web/src/components/ui/textarea.tsx:7](E:/ppxb/jm-boom/web/src/components/ui/textarea.tsx:7)、[E:/ppxb/jm-boom/web/src/components/ui/pagination.tsx:41](E:/ppxb/jm-boom/web/src/components/ui/pagination.tsx:41) | input / textarea / a | shadcn 基础组件底层使用原生元素是正常实现；分页问题在业务禁用行为。 |
 
@@ -347,15 +349,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 08 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 09 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 126 个现有 CRLF 源码文件仍被报告。本次修改的收藏页和测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 122 个现有 CRLF 源码文件仍被报告。本次修改和新增的 6 个详情页相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 29 个测试通过，含第 05、06 项的 10 个、第 07 项的 4 个和第 08 项新增的 5 个 React 挂载回归测试 |
+| web：bun test | 35 个测试通过，含第 05、06 项的 10 个、第 07 项的 4 个、第 08 项的 5 个和第 09 项新增的 6 个 React 挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -371,4 +373,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 8 条已修复、42 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 9 条已修复、41 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。

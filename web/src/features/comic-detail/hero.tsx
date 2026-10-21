@@ -34,8 +34,8 @@ export function ComicHero({
   favoriteBusy = false
 }: {
   comic: ComicDetail
-  readingTarget: ComicReadingTarget
-  isFavorite: boolean
+  readingTarget: ComicReadingTarget | null
+  isFavorite: boolean | undefined
   onCommentsClick: () => void
   onDownloadClick: () => void
   onFavoriteClick: () => void
@@ -87,22 +87,29 @@ export function ComicHero({
         </div>
 
         <div className="hidden flex-wrap gap-2 md:flex">
-          <Button asChild>
-            <Link
-              to="/reader/$comicId"
-              params={{ comicId: readingTarget.readId }}
-              search={{
-                albumId: comic.id,
-                page: readingTarget.page
-              }}
-            >
+          {readingTarget ? (
+            <Button asChild>
+              <Link
+                to="/reader/$comicId"
+                params={{ comicId: readingTarget.readId }}
+                search={{
+                  albumId: comic.id,
+                  page: readingTarget.page
+                }}
+              >
+                <BookOpenIcon className="size-4" />
+                {readingTarget.isContinue ? '继续阅读' : '开始阅读'}
+              </Link>
+            </Button>
+          ) : (
+            <Button disabled>
               <BookOpenIcon className="size-4" />
-              {readingTarget.isContinue ? '继续阅读' : '开始阅读'}
-            </Link>
-          </Button>
+              阅读进度未知
+            </Button>
+          )}
           <Button
             variant={isFavorite ? 'secondary' : 'outline'}
-            disabled={favoriteBusy}
+            disabled={favoriteBusy || isFavorite === undefined}
             onClick={onFavoriteClick}
           >
             {isFavorite ? (
@@ -110,7 +117,7 @@ export function ComicHero({
             ) : (
               <BookmarkIcon className="size-4" />
             )}
-            {isFavorite ? '已收藏' : '收藏'}
+            {isFavorite === undefined ? '收藏状态未知' : isFavorite ? '已收藏' : '收藏'}
           </Button>
           <Button variant="outline" disabled={downloadBusy} onClick={onDownloadClick}>
             <DownloadIcon className="size-4" />

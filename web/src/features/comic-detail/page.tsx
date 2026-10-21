@@ -5,6 +5,7 @@ import { BackTopButton } from '@/components/back-top-button'
 import { EmptyState } from '@/components/empty-state'
 import { PageBackButton } from '@/components/page-back-button'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import type { ComicDetail } from '@/domain/comic'
 import { getComicDetail, getComicState, type ComicStateResult } from '@/lib/api/comic'
 import { sortComicChapters } from '@/lib/comic'
@@ -58,11 +59,33 @@ export function ComicDetailPage({ comicId }: { comicId: string }) {
         ) : detail.data == null ? (
           <EmptyState emoji="(･o･;)" title="暂无详情" />
         ) : (
-          <ComicDetailView
-            comic={detail.data.comic}
-            state={comicState.data}
-            stateLoading={comicState.isLoading}
-          />
+          <>
+            {comicState.isError ? (
+              <Card size="sm" role="alert">
+                <CardContent className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-muted-foreground">
+                    收藏与阅读进度加载失败。
+                    {comicState.data
+                      ? '当前显示上次记录，可重试更新。'
+                      : '请重试，或从章节列表开始阅读。'}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={comicState.isFetching}
+                    onClick={() => void comicState.refetch()}
+                  >
+                    {comicState.isFetching ? '重试中…' : '重试状态'}
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : !comicState.data && comicState.isLoading ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                正在读取收藏与阅读进度…
+              </p>
+            ) : null}
+            <ComicDetailView comic={detail.data.comic} state={comicState.data} />
+          </>
         )}
       </div>
       <BackTopButton />
@@ -72,12 +95,10 @@ export function ComicDetailPage({ comicId }: { comicId: string }) {
 
 function ComicDetailView({
   comic,
-  state,
-  stateLoading
+  state
 }: {
   comic: ComicDetail
   state: ComicStateResult | undefined
-  stateLoading: boolean
 }) {
   const readingHistory = state?.history ?? undefined
   const [isCommentsOpen, setIsCommentsOpen] = useState(false)
@@ -89,10 +110,10 @@ function ComicDetailView({
     [chaptersDescending, readingChapters]
   )
   const readingTarget = useMemo(
-    () => resolveComicReadingTarget(comic, readingChapters, readingHistory),
-    [comic, readingChapters, readingHistory]
+    () => (state ? resolveComicReadingTarget(comic, readingChapters, readingHistory) : null),
+    [comic, readingChapters, readingHistory, state]
   )
-  const favorite = useComicFavorite({ comic, state, stateLoading })
+  const favorite = useComicFavorite({ comic, state })
   const download = useComicDownload(comic, sortedChapters)
   const handleCoverSettled = useComicReaderPreload(comic, readingTarget)
 

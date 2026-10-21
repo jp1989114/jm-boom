@@ -9,21 +9,20 @@ import { clearReaderPreloadScope, setReaderPreloadScope } from '@/lib/reader-pre
 import { useSettingsStore } from '@/stores/settings-store'
 import type { ComicReadingTarget } from './reading-target'
 
-export function useComicReaderPreload(comic: ComicDetail, readingTarget: ComicReadingTarget) {
+export function useComicReaderPreload(
+  comic: ComicDetail,
+  readingTarget: ComicReadingTarget | null
+) {
   const queryClient = useQueryClient()
   const hideCovers = useSettingsStore(state => state.hideCovers)
   const [settledCoverUrl, setSettledCoverUrl] = useState('')
   const preloadScope = `detail:${comic.id}`
   const isCoverSettled = hideCovers || comic.image.length === 0 || settledCoverUrl === comic.image
+  const readId = readingTarget?.readId.trim() ?? ''
+  const startPage = readingTarget?.page ?? 1
 
   useEffect(() => {
-    if (!isCoverSettled) {
-      return
-    }
-
-    const readId = readingTarget.readId.trim()
-
-    if (readId.length === 0) {
+    if (!isCoverSettled || readId.length === 0) {
       return
     }
 
@@ -41,7 +40,7 @@ export function useComicReaderPreload(comic: ComicDetail, readingTarget: ComicRe
           return
         }
 
-        const initialPageIndex = Math.max((readingTarget.page ?? 1) - 1, 0)
+        const initialPageIndex = Math.max(startPage - 1, 0)
         const startIndex = Math.min(initialPageIndex, Math.max(manifest.pages.length - 1, 0))
         const paths = manifest.pages
           .slice(startIndex, startIndex + READER.PREFETCH_AHEAD_PAGES)
@@ -58,7 +57,7 @@ export function useComicReaderPreload(comic: ComicDetail, readingTarget: ComicRe
       isActive = false
       clearReaderPreloadScope(preloadScope)
     }
-  }, [isCoverSettled, preloadScope, queryClient, readingTarget.page, readingTarget.readId])
+  }, [isCoverSettled, preloadScope, queryClient, readId, startPage])
 
   return useCallback(() => setSettledCoverUrl(comic.image), [comic.image])
 }

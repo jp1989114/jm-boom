@@ -8,15 +8,13 @@ import { queryKeys } from '@/lib/query-keys'
 
 export function useComicFavorite({
   comic,
-  state,
-  stateLoading
+  state
 }: {
   comic: ComicDetail
   state: ComicStateResult | undefined
-  stateLoading: boolean
 }) {
   const queryClient = useQueryClient()
-  const isFavorite = state?.isFavorite ?? false
+  const isFavorite = state?.isFavorite
   const mutation = useMutation({
     mutationFn: async () => {
       if (isFavorite) {
@@ -48,12 +46,13 @@ export function useComicFavorite({
   })
 
   function toggle() {
+    if (!state || mutation.isPending) return
     mutation.mutate()
   }
 
   return {
     isFavorite,
-    isPending: stateLoading || mutation.isPending,
+    isPending: mutation.isPending,
     toggle
   }
 }
