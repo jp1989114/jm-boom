@@ -205,7 +205,12 @@ fn is_unsupported_section(title: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_unsupported_section;
+    use super::{decode_response, is_unsupported_section, JmError, JmRequestSignature, JmResult};
+    use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyInit};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    use serde_json::{json, Value};
+
+    const TEST_URL: &str = "https://upstream.example/test";
 
     #[test]
     fn filters_unsupported_home_sections() {
@@ -214,6 +219,98 @@ mod tests {
         }
 
         assert!(!is_unsupported_section("每周推荐"));
+    }
+
+    #[tokio::test]
+    async fn retries_transient_http_failures_without_requiring_json() {
+        for (status, body) in [
+            (502, "<html>Bad Gateway</html>"),
+            (503, r#"{"code":503,"errorMsg":"unavailable"}"#),
+            (500, ""),
+            (504, "Gateway Timeout"),
+            (408, ""),
+            (429, r#"{"errorMsg":"rate limited"}"#),
+        ] {
+            let error = decode_test_response(status, body).await.unwrap_err();
+            assert!(matches!(error, JmError::Http(_)), "{status}: {error:?}");
+            assert!(error.is_retryable());
+            assert!(error.to_string().contains(&status.to_string()));
+            assert!(error.to_string().contains(TEST_URL));
+        }
+    }
+
+    #[tokio::test]
+    async fn permanent_http_failures_preserve_messages_without_requiring_json() {
+        for (status, body, message) in [
+            (400, r#"{"code":400,"errorMsg":"无效请求"}"#, "无效请求"),
+            (400, r#"{"errorMsg":"缺少参数"}"#, "缺少参数"),
+            (401, "", "HTTP 401 Unauthorized"),
+            (403, "<html>Forbidden</html>", "HTTP 403 Forbidden"),
+            (404, "Not Found", "HTTP 404 Not Found"),
+        ] {
+            let error = decode_test_response(status, body).await.unwrap_err();
+            assert!(matches!(&error, JmError::Api(value) if value.contains(message)));
+            assert!(!error.is_retryable());
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_http_business_errors_remain_non_retryable() {
+        let error = decode_test_response(200, r#"{"code":400,"errorMsg":"密码错误"}"#)
+            .await
+            .unwrap_err();
+        assert!(matches!(&error, JmError::Api(message) if message == "密码错误"));
+        assert!(!error.is_retryable());
+    }
+
+    #[tokio::test]
+    async fn decodes_plain_success_payloads() {
+        let value = decode_test_response(200, r#"{"code":200,"data":{"id":123}}"#)
+            .await
+            .unwrap();
+        assert_eq!(value, json!({"id": 123}));
+    }
+
+    #[tokio::test]
+    async fn decodes_encrypted_success_payloads() {
+        let signature = JmRequestSignature::new();
+        let payload = json!({"id": 123, "name": "测试"});
+        let key = format!(
+            "{:x}",
+            md5::compute(format!("{}{}", signature.ts, crate::jm::API_SECRET))
+        );
+        let encrypted = ecb::Encryptor::<aes::Aes256>::new_from_slice(key.as_bytes())
+            .unwrap()
+            .encrypt_padded_vec_mut::<Pkcs7>(payload.to_string().as_bytes());
+        let body = json!({"code": 200, "data": BASE64.encode(encrypted)}).to_string();
+        let value = decode_response::<Value>(test_response(200, &body), TEST_URL, &signature)
+            .await
+            .unwrap();
+        assert_eq!(value, payload);
+    }
+
+    #[tokio::test]
+    async fn malformed_success_payloads_remain_non_retryable() {
+        let error = decode_test_response(200, "not JSON").await.unwrap_err();
+        assert!(matches!(error, JmError::Payload(_)));
+        assert!(!error.is_retryable());
+    }
+
+    async fn decode_test_response(status: u16, body: &str) -> JmResult<Value> {
+        decode_response(
+            test_response(status, body),
+            TEST_URL,
+            &JmRequestSignature::new(),
+        )
+        .await
+    }
+
+    fn test_response(status: u16, body: &str) -> reqwest::Response {
+        axum::http::Response::builder()
+            .status(status)
+            .body(body.to_string())
+            .unwrap()
+            .into()
     }
 }
 
@@ -280,26 +377,30 @@ async fn decode_response<T: DeserializeOwned>(
     signature: &JmRequestSignature,
 ) -> JmResult<T> {
     let status = response.status();
+    if status.is_server_error() || matches!(status.as_u16(), 408 | 429) {
+        return Err(JmError::Http(format!("HTTP {status}: {url}")));
+    }
+
     let body = response
         .text()
         .await
         .map_err(|e| JmError::Network(e.to_string()))?;
 
     let body = body.trim();
+    if !status.is_success() {
+        let message = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|envelope| envelope.get("errorMsg")?.as_str().map(str::to_string))
+            .unwrap_or_else(|| format!("HTTP {status}: {url}"));
+        return Err(JmError::Api(message));
+    }
+
     if body.is_empty() {
         return Err(JmError::Empty);
     }
 
     let envelope: ApiResponse<T> =
         serde_json::from_str(body).map_err(|e| JmError::Payload(e.to_string()))?;
-
-    if !status.is_success() {
-        return Err(JmError::Api(
-            envelope
-                .error_msg
-                .unwrap_or_else(|| format!("HTTP {}: {url}", status)),
-        ));
-    }
 
     if envelope.code != 200 {
         return Err(JmError::Api(

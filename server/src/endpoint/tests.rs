@@ -139,6 +139,70 @@ async fn failover_retries_the_next_available_candidate() {
 }
 
 #[tokio::test]
+async fn http_responses_follow_the_expected_failover_policy() {
+    let (fallback, fallback_server) = mock_endpoint(200, r#"{"code":200,"data":{"id":123}}"#).await;
+    let mut jm = JmClient::new().expect("create JM client");
+    jm.client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    for (status, body, should_retry) in [
+        (502, "<html>Bad Gateway</html>", true),
+        (503, r#"{"code":503,"errorMsg":"unavailable"}"#, true),
+        (408, "", true),
+        (429, r#"{"errorMsg":"rate limited"}"#, true),
+        (400, r#"{"errorMsg":"invalid request"}"#, false),
+        (401, "", false),
+        (200, r#"{"code":400,"errorMsg":"invalid password"}"#, false),
+    ] {
+        let (first, first_server) = mock_endpoint(status, body).await;
+        let manager = test_manager().await;
+        {
+            let mut inner = manager.inner.write().await;
+            inner.probe_completed = true;
+            inner.current_endpoint = first.clone();
+            inner.endpoints = vec![available(&first, 1), available(&fallback, 2)];
+        }
+
+        let result = request_with_failover(&jm, &manager, |client, endpoint| {
+            Box::pin(async move { client.get::<serde_json::Value>(endpoint, "test", &[]).await })
+        })
+        .await;
+        first_server.abort();
+
+        if should_retry {
+            let (endpoint, payload) = result.expect("fail over after transient HTTP failure");
+            assert_eq!(endpoint, fallback);
+            assert_eq!(payload, serde_json::json!({"id": 123}));
+            assert!(!manager.state().await.endpoints[0].available);
+        } else {
+            let error = result.expect_err("return permanent error without failover");
+            assert!(matches!(error, JmError::Api(_)), "{status}: {error:?}");
+            assert!(!error.is_retryable());
+            assert_eq!(manager.state().await.current_endpoint, first);
+            assert!(manager.state().await.endpoints[0].available);
+        }
+    }
+    fallback_server.abort();
+}
+
+async fn mock_endpoint(status: u16, body: &'static str) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let status = axum::http::StatusCode::from_u16(status).unwrap();
+    let app = axum::Router::new().route(
+        "/test",
+        axum::routing::get(move || async move { (status, body) }),
+    );
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (endpoint, server)
+}
+
+#[tokio::test]
 async fn selected_endpoint_round_trips_through_repository() {
     let db = test_db().await;
     let manager = EndpointManager::new(db.clone())
