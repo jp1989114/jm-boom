@@ -74,6 +74,10 @@ docker compose up -d
 本项目仅供学习、研究和技术交流使用。项目作者与任何第三方服务、原始应用或内容提供方无关。
 使用者应自行遵守当地法律法规以及相关服务条款。因使用本项目产生的任何法律、版权、账号、数据或财务风险均由使用者自行承担。
 
+## 联系我们
+
+[Telegram](https://t.me/miyabi_cn)
+
 ## License
 
 遵循 [MIT](https://github.com/ppxb/jm-boom/blob/master/LICENSE) 协议。
