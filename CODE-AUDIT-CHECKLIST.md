@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 项已修复，其余 49 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2 项已修复，其余 48 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -12,15 +12,17 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   已修复：`decode_response` 在读取和解析正文前，将 HTTP 5xx、408、429 归为可重试的 `Http` 错误，保留状态码与请求 URL。其他非 2xx 响应尝试提取 `errorMsg`，没有合法 JSON 时使用 HTTP 错误文案，保持不可重试；仅成功响应进入原有业务信封解析及解密流程。沿用现有端点切换机制。
 
-  验证：新增 7 个回归测试，覆盖 HTML/JSON/空正文的 HTTP 故障、普通 4xx 文案、业务错误、正常 JSON 与加密响应，并通过本地模拟 HTTP 端点验证实际故障切换。后端 70 个测试、格式检查和 Clippy 均通过。
+  验证：新增 7 个回归测试，覆盖 HTML/JSON/空正文的 HTTP 故障、普通 4xx 文案、业务错误、正常 JSON 与加密响应，并通过本地模拟 HTTP 端点验证实际故障切换。后端测试、格式检查和 Clippy 均通过，最新基线见文末。
 
   完整路径：[E:/ppxb/jm-boom/server/src/jm/client.rs:374](E:/ppxb/jm-boom/server/src/jm/client.rs:374)；[E:/ppxb/jm-boom/server/src/jm/client.rs:225](E:/ppxb/jm-boom/server/src/jm/client.rs:225)；[E:/ppxb/jm-boom/server/src/endpoint/tests.rs:142](E:/ppxb/jm-boom/server/src/endpoint/tests.rs:142)；[E:/ppxb/jm-boom/server/src/jm/error.rs:43](E:/ppxb/jm-boom/server/src/jm/error.rs:43)；[E:/ppxb/jm-boom/server/src/endpoint/failover.rs:38](E:/ppxb/jm-boom/server/src/endpoint/failover.rs:38)。
 
-- [ ] **02 · P1 · 删除下载任务期间仍允许恢复，存在并发删除与新 worker 竞争**
+- [x] **02 · P1 · 删除下载任务期间仍允许恢复，存在并发删除与新 worker 竞争（已修复）**
 
-  `remove` 先把任务改成 `Cancelled`，随后释放 tasks 锁并等待 worker、删除目录和数据库；`resume` 恰好允许从 `Cancelled` 恢复。两个请求交错时，新 generation 可在删除尚未结束时启动，后续 `persist_task` 的 UPSERT 还可能重新插入已删记录。应按 task_id 串行化这段管理操作或明确禁止删除期间恢复，保留现有 generation 模型。
+  已修复：DownloadManager 复用现有 `KeyedLock`，按 task_id 串行化恢复、删除以及暂停/取消的完整管理流程，覆盖状态修改、持久化和 worker 停止/调度。删除完成后，等待中的恢复请求返回 NotFound；先开始的恢复或停止操作必须完成持久化，删除才会继续。不同任务仍可并行，worker 保留现有 generation 校验，不获取管理操作锁，避免删除等待 worker 时相互阻塞。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/download/manager.rs:194](E:/ppxb/jm-boom/server/src/download/manager.rs:194)；[E:/ppxb/jm-boom/server/src/download/manager.rs:223](E:/ppxb/jm-boom/server/src/download/manager.rs:223)；[E:/ppxb/jm-boom/server/src/download/repository.rs:44](E:/ppxb/jm-boom/server/src/download/repository.rs:44)；[E:/ppxb/jm-boom/server/src/download/scheduler.rs:48](E:/ppxb/jm-boom/server/src/download/scheduler.rs:48)。
+  验证：先用通知与单连接数据库控制请求交错，新增的 3 个并发回归测试在旧代码上全部失败，修复后全部通过。覆盖删除期间恢复、恢复持久化期间删除、暂停/取消持久化期间删除，并验证任务记录、manifest、文件及 worker 清理和不同任务的并发性。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/download/manager.rs:198](E:/ppxb/jm-boom/server/src/download/manager.rs:198)；[E:/ppxb/jm-boom/server/src/download/manager.rs:228](E:/ppxb/jm-boom/server/src/download/manager.rs:228)；[E:/ppxb/jm-boom/server/src/download/manager.rs:262](E:/ppxb/jm-boom/server/src/download/manager.rs:262)；[E:/ppxb/jm-boom/server/src/download/manager.rs:529](E:/ppxb/jm-boom/server/src/download/manager.rs:529)；[E:/ppxb/jm-boom/server/src/keyed_lock.rs:28](E:/ppxb/jm-boom/server/src/keyed_lock.rs:28)。
 
 - [ ] **03 · P2 · 暂停、取消和删除不能及时打断正在进行的上游网络请求**
 
@@ -32,7 +34,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   `DownloadCoverOverlay.canCancel` 包含 `paused`，而 `stop_task` 只接受 `Queued | Running`。暂停后点击取消会稳定失败。应统一状态转换契约，并用一个暂停后取消的用例验证。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:123](E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:123)；[E:/ppxb/jm-boom/server/src/download/manager.rs:256](E:/ppxb/jm-boom/server/src/download/manager.rs:256)。
+  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:123](E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:123)；[E:/ppxb/jm-boom/server/src/download/manager.rs:262](E:/ppxb/jm-boom/server/src/download/manager.rs:262)。
 
 - [ ] **05 · P2 · 阅读进度保存失败后丢失待保存记录**
 
@@ -136,7 +138,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   `removeDownloadTasks` 逐个 await 单删 API，只消费最后一次结果；部分成功后若某次失败，前端还不会应用已完成删除的结果。应新增批量删除接口，一次提交 ID，由服务端完成 worker 停止及 manifest/目录清理，返回一次最终结果。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:80](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:80)；[E:/ppxb/jm-boom/web/src/lib/api/download.ts:75](E:/ppxb/jm-boom/web/src/lib/api/download.ts:75)；[E:/ppxb/jm-boom/server/src/api/downloads.rs:48](E:/ppxb/jm-boom/server/src/api/downloads.rs:48)；[E:/ppxb/jm-boom/server/src/download/manager.rs:223](E:/ppxb/jm-boom/server/src/download/manager.rs:223)。
+  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:80](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:80)；[E:/ppxb/jm-boom/web/src/lib/api/download.ts:75](E:/ppxb/jm-boom/web/src/lib/api/download.ts:75)；[E:/ppxb/jm-boom/server/src/api/downloads.rs:48](E:/ppxb/jm-boom/server/src/api/downloads.rs:48)；[E:/ppxb/jm-boom/server/src/download/manager.rs:228](E:/ppxb/jm-boom/server/src/download/manager.rs:228)。
 
 - [ ] **22 · P2 · 上游大页被切成小页后，每次翻页重复下载同一份源数据**
 
@@ -333,7 +335,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 1 项修复后重新执行了后端基线与 diff 检查。前端未改动，以下前端结果沿用初次审计记录。
+第 2 项修复后重新执行了后端基线与 diff 检查。前端未改动，以下前端结果沿用初次审计记录。
 
 | 命令 | 结果 |
 | --- | --- |
@@ -342,7 +344,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 | web：bun run fmt:check | 未通过：128 个文件被报告，工作区恰有 128 个 CRLF 源文件；抽样仅替换为 LF 后与格式化输出完全一致。Git 索引样本是 LF，core.autocrlf=true，不能据此断言 128 个文件都有源码风格问题。 |
 | web：bun run build | 通过 |
 | web：bun test | 10 个测试通过 |
-| server：cargo test --locked | 70 个测试通过，含第 1 项新增的 7 个回归测试 |
+| server：cargo test --locked | 73 个测试通过，含第 1 项新增的 7 个回归测试和第 2 项新增的 3 个并发回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
 | 根目录：git diff --check | 通过 |
@@ -357,4 +359,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 1 条已修复、49 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 2 条已修复、48 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。

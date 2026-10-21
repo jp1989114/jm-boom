@@ -12,6 +12,7 @@ use crate::{
     cache::CachedReaderPage,
     endpoint::{request_with_failover, EndpointManager},
     jm::{JmClient, JmResult},
+    keyed_lock::KeyedLock,
     page_materializer::PageMaterializer,
 };
 use sqlx::SqlitePool;
@@ -46,6 +47,8 @@ pub struct DownloadManager {
     pub(super) workers: Arc<Mutex<HashMap<String, WorkerHandle>>>,
     pub(super) task_semaphore: Arc<Semaphore>,
     pub(super) progress_persisted_at: Arc<Mutex<HashMap<String, Instant>>>,
+    // Workers must not take this lock: removal holds it while waiting for their exit.
+    task_operations: KeyedLock,
 }
 
 impl DownloadManager {
@@ -91,6 +94,7 @@ impl DownloadManager {
             workers: Arc::new(Mutex::new(HashMap::new())),
             task_semaphore: Arc::new(Semaphore::new(DOWNLOAD_TASK_CONCURRENCY)),
             progress_persisted_at: Arc::new(Mutex::new(HashMap::new())),
+            task_operations: KeyedLock::new(),
         })
     }
 
@@ -192,6 +196,7 @@ impl DownloadManager {
     }
 
     pub async fn resume(&self, task_id: &str) -> DownloadResult<DownloadTaskList> {
+        let _operation = self.task_operations.lock(task_id).await;
         let snapshot = {
             let mut tasks = self.tasks.write().await;
             let task = tasks.get_mut(task_id).ok_or(DownloadError::NotFound)?;
@@ -221,6 +226,7 @@ impl DownloadManager {
     }
 
     pub async fn remove(&self, task_id: &str) -> DownloadResult<DownloadTaskList> {
+        let _operation = self.task_operations.lock(task_id).await;
         let snapshot = {
             let mut tasks = self.tasks.write().await;
             let task = tasks.get_mut(task_id).ok_or(DownloadError::NotFound)?;
@@ -259,6 +265,7 @@ impl DownloadManager {
         status: DownloadStatus,
         operation: &'static str,
     ) -> DownloadResult<()> {
+        let _operation = self.task_operations.lock(task_id).await;
         let snapshot = {
             let mut tasks = self.tasks.write().await;
             let task = tasks.get_mut(task_id).ok_or(DownloadError::NotFound)?;
@@ -318,7 +325,7 @@ fn invalid_state(operation: &'static str, status: DownloadStatus) -> DownloadErr
 
 #[cfg(test)]
 mod tests {
-    use super::DownloadManager;
+    use super::{DownloadManager, WorkerHandle};
     use crate::{
         cache::{CachedReaderPage, ImageCache},
         download::{
@@ -334,15 +341,22 @@ mod tests {
     };
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
     use std::{
+        future::{poll_fn, Future},
         io::Cursor,
         path::PathBuf,
+        pin::Pin,
         sync::{
             atomic::{AtomicU64, Ordering},
             Arc,
         },
+        task::Poll,
         time::{Duration, Instant},
     };
-    use tokio::{fs, sync::Semaphore, time::timeout};
+    use tokio::{
+        fs,
+        sync::{watch, Semaphore},
+        time::timeout,
+    };
 
     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -509,6 +523,189 @@ mod tests {
             .expect("check deleted download directory"));
 
         cleanup(manager, root).await;
+    }
+
+    #[tokio::test]
+    async fn management_resume_waits_for_deletion() {
+        let db = test_db().await;
+        let (manager, root) = test_manager("remove-resume", db).await;
+        let task = test_task("task-remove", DownloadStatus::Running, 1);
+        let chapter = &task.chapters[0];
+        insert_task(&manager, task.clone()).await;
+        insert_task(&manager, test_task("task-other", DownloadStatus::Paused, 1)).await;
+        manager
+            .repository
+            .persist_manifest(&task, chapter, &["001.png".into()])
+            .await
+            .unwrap();
+        manager
+            .repository
+            .complete_manifest(&task.task_id, &chapter.chapter_id)
+            .await
+            .unwrap();
+        manager
+            .storage
+            .store_page(
+                &task.task_id,
+                &chapter.chapter_id,
+                0,
+                &CachedReaderPage {
+                    data: png_data(),
+                    format: PageImageFormat::Png,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Keep the old worker alive until the test explicitly acknowledges its exit.
+        let (cancel, mut cancelled) = watch::channel(false);
+        let (finished, _) = watch::channel(false);
+        manager.workers.lock().await.insert(
+            task.task_id.clone(),
+            WorkerHandle {
+                generation: task.generation,
+                cancel,
+                finished: finished.clone(),
+            },
+        );
+        let removing_manager = manager.clone();
+        let mut removing = Box::pin(async move { removing_manager.remove("task-remove").await });
+        timeout(Duration::from_secs(1), async {
+            tokio::select! {
+                result = &mut removing => panic!("deletion must wait for the worker: {result:?}"),
+                result = cancelled.changed() => result.expect("worker cancellation notification"),
+            }
+        })
+        .await
+        .expect("deletion should reach worker cancellation");
+
+        let resuming_manager = manager.clone();
+        let mut resuming = Box::pin(async move { resuming_manager.resume("task-remove").await });
+        assert_pending(resuming.as_mut()).await;
+        assert_eq!(
+            task_snapshot(&manager, "task-remove").await.status,
+            DownloadStatus::Cancelled,
+            "resume must not change a task while deletion waits for its worker"
+        );
+
+        timeout(Duration::from_secs(1), manager.resume("task-other"))
+            .await
+            .expect("another task must not wait for this deletion")
+            .expect("resume unrelated task");
+        wait_for_worker(&manager, "task-other", true).await;
+
+        manager.workers.lock().await.remove("task-remove");
+        finished.send(true).expect("acknowledge old worker exit");
+        let (removed, resumed) = timeout(Duration::from_secs(1), async {
+            tokio::join!(removing, resuming)
+        })
+        .await
+        .expect("management operations should finish");
+        removed.expect("delete task");
+        assert!(matches!(resumed, Err(DownloadError::NotFound)));
+        assert_task_removed(&manager, "task-remove").await;
+        assert!(manager
+            .repository
+            .offline_manifest(&chapter.chapter_id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!fs::try_exists(root.join("downloads").join("task-remove"))
+            .await
+            .unwrap());
+
+        manager.cancel("task-other").await.unwrap();
+        wait_for_worker(&manager, "task-other", false).await;
+        cleanup(manager, root).await;
+    }
+
+    #[tokio::test]
+    async fn management_deletion_waits_for_resume_persistence() {
+        let db = test_db().await;
+        let (manager, root) = test_manager("resume-remove", db.clone()).await;
+        insert_task(
+            &manager,
+            test_task("task-resume", DownloadStatus::Paused, 1),
+        )
+        .await;
+
+        // Hold the only connection so resume cannot finish persisting its new generation.
+        let connection = db.acquire().await.unwrap();
+        let resuming_manager = manager.clone();
+        let mut resuming = Box::pin(async move { resuming_manager.resume("task-resume").await });
+        assert_pending(resuming.as_mut()).await;
+        assert_eq!(
+            task_snapshot(&manager, "task-resume").await.status,
+            DownloadStatus::Queued
+        );
+
+        let removing_manager = manager.clone();
+        let mut removing = Box::pin(async move { removing_manager.remove("task-resume").await });
+        assert_pending(removing.as_mut()).await;
+        assert_eq!(
+            task_snapshot(&manager, "task-resume").await.status,
+            DownloadStatus::Queued,
+            "deletion must wait until the earlier resume is persisted"
+        );
+
+        drop(connection);
+        let (resumed, removed) = timeout(Duration::from_secs(1), async {
+            tokio::join!(resuming, removing)
+        })
+        .await
+        .expect("management operations should finish");
+        resumed.expect("finish earlier resume");
+        removed.expect("delete resumed task");
+        assert_task_removed(&manager, "task-resume").await;
+        cleanup(manager, root).await;
+    }
+
+    #[tokio::test]
+    async fn management_deletion_waits_for_stop_persistence() {
+        for pause in [true, false] {
+            let db = test_db().await;
+            let (manager, root) = test_manager("stop-remove", db.clone()).await;
+            insert_task(&manager, test_task("task-stop", DownloadStatus::Running, 1)).await;
+            let connection = db.acquire().await.unwrap();
+            let stopping_manager = manager.clone();
+            let mut stopping = Box::pin(async move {
+                if pause {
+                    stopping_manager.pause("task-stop").await
+                } else {
+                    stopping_manager.cancel("task-stop").await
+                }
+            });
+            assert_pending(stopping.as_mut()).await;
+            let stopped = task_snapshot(&manager, "task-stop").await;
+            assert_eq!(
+                stopped.status,
+                if pause {
+                    DownloadStatus::Paused
+                } else {
+                    DownloadStatus::Cancelled
+                }
+            );
+
+            let removing_manager = manager.clone();
+            let mut removing = Box::pin(async move { removing_manager.remove("task-stop").await });
+            assert_pending(removing.as_mut()).await;
+            assert_eq!(
+                task_snapshot(&manager, "task-stop").await.generation,
+                stopped.generation,
+                "deletion must wait until the earlier stop is persisted"
+            );
+
+            drop(connection);
+            let (stopped, removed) = timeout(Duration::from_secs(1), async {
+                tokio::join!(stopping, removing)
+            })
+            .await
+            .expect("management operations should finish");
+            stopped.expect("finish earlier stop");
+            removed.expect("delete stopped task");
+            assert_task_removed(&manager, "task-stop").await;
+            cleanup(manager, root).await;
+        }
     }
 
     #[tokio::test]
@@ -709,6 +906,24 @@ mod tests {
             .into_iter()
             .find(|task| task.task_id == task_id)
             .expect("persisted task should exist")
+    }
+
+    async fn assert_pending<F: Future>(mut future: Pin<&mut F>) {
+        assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+            .await
+            .is_pending());
+    }
+
+    async fn assert_task_removed(manager: &DownloadManager, task_id: &str) {
+        assert!(!manager.tasks.read().await.contains_key(task_id));
+        assert!(!manager
+            .repository
+            .load_tasks()
+            .await
+            .unwrap()
+            .iter()
+            .any(|task| task.task_id == task_id));
+        wait_for_worker(manager, task_id, false).await;
     }
 
     async fn wait_for_worker(manager: &DownloadManager, task_id: &str, expected: bool) {
