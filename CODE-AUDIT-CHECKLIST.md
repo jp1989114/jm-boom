@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3 项已修复，其余 47 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4 项已修复，其余 46 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -22,7 +22,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   验证：先用通知与单连接数据库控制请求交错，新增的 3 个并发回归测试在旧代码上全部失败，修复后全部通过。覆盖删除期间恢复、恢复持久化期间删除、暂停/取消持久化期间删除，并验证任务记录、manifest、文件及 worker 清理和不同任务的并发性。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/download/manager.rs:198](E:/ppxb/jm-boom/server/src/download/manager.rs:198)；[E:/ppxb/jm-boom/server/src/download/manager.rs:228](E:/ppxb/jm-boom/server/src/download/manager.rs:228)；[E:/ppxb/jm-boom/server/src/download/manager.rs:262](E:/ppxb/jm-boom/server/src/download/manager.rs:262)；[E:/ppxb/jm-boom/server/src/download/manager.rs:530](E:/ppxb/jm-boom/server/src/download/manager.rs:530)；[E:/ppxb/jm-boom/server/src/keyed_lock.rs:28](E:/ppxb/jm-boom/server/src/keyed_lock.rs:28)。
+  完整路径：[E:/ppxb/jm-boom/server/src/download/manager.rs:198](E:/ppxb/jm-boom/server/src/download/manager.rs:198)；[E:/ppxb/jm-boom/server/src/download/manager.rs:228](E:/ppxb/jm-boom/server/src/download/manager.rs:228)；[E:/ppxb/jm-boom/server/src/download/manager.rs:262](E:/ppxb/jm-boom/server/src/download/manager.rs:262)；[E:/ppxb/jm-boom/server/src/download/manager.rs:598](E:/ppxb/jm-boom/server/src/download/manager.rs:598)；[E:/ppxb/jm-boom/server/src/keyed_lock.rs:28](E:/ppxb/jm-boom/server/src/keyed_lock.rs:28)。
 
 - [x] **03 · P2 · 暂停、取消和删除不能及时打断正在进行的上游网络请求（已修复）**
 
@@ -30,13 +30,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   验证：新增 3 个回归测试，旧代码均因取消后继续等待而超时，修复后通过。真实 HTTP 模拟覆盖章节、图片域名查询、图片下载三个阻塞阶段下的暂停/取消/删除，共 9 种组合，并验证暂停后恢复、任务名额释放及删除清理。共享页面测试验证取消等待者不影响请求发起者；取消下载发起者后，读者可接手重新获取页面，完成解扰和缓存写入。测试以 1 秒为退出上限，不依赖上游网络超时。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/download/worker.rs:54](E:/ppxb/jm-boom/server/src/download/worker.rs:54)；[E:/ppxb/jm-boom/server/src/download/worker.rs:91](E:/ppxb/jm-boom/server/src/download/worker.rs:91)；[E:/ppxb/jm-boom/server/src/download/scheduler.rs:114](E:/ppxb/jm-boom/server/src/download/scheduler.rs:114)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:145](E:/ppxb/jm-boom/server/src/page_materializer.rs:145)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:188](E:/ppxb/jm-boom/server/src/page_materializer.rs:188)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:269](E:/ppxb/jm-boom/server/src/page_materializer.rs:269)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:702](E:/ppxb/jm-boom/server/src/page_materializer.rs:702)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:747](E:/ppxb/jm-boom/server/src/page_materializer.rs:747)；[E:/ppxb/jm-boom/server/src/download/manager.rs:713](E:/ppxb/jm-boom/server/src/download/manager.rs:713)。
+  完整路径：[E:/ppxb/jm-boom/server/src/download/worker.rs:54](E:/ppxb/jm-boom/server/src/download/worker.rs:54)；[E:/ppxb/jm-boom/server/src/download/worker.rs:91](E:/ppxb/jm-boom/server/src/download/worker.rs:91)；[E:/ppxb/jm-boom/server/src/download/scheduler.rs:114](E:/ppxb/jm-boom/server/src/download/scheduler.rs:114)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:145](E:/ppxb/jm-boom/server/src/page_materializer.rs:145)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:188](E:/ppxb/jm-boom/server/src/page_materializer.rs:188)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:269](E:/ppxb/jm-boom/server/src/page_materializer.rs:269)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:702](E:/ppxb/jm-boom/server/src/page_materializer.rs:702)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:747](E:/ppxb/jm-boom/server/src/page_materializer.rs:747)；[E:/ppxb/jm-boom/server/src/download/manager.rs:781](E:/ppxb/jm-boom/server/src/download/manager.rs:781)。
 
-- [ ] **04 · P2 · 前端显示“取消已暂停任务”，后端却拒绝该转换**
+- [x] **04 · P2 · 前端显示“取消已暂停任务”，后端却拒绝该转换（已修复）**
 
-  `DownloadCoverOverlay.canCancel` 包含 `paused`，而 `stop_task` 只接受 `Queued | Running`。暂停后点击取消会稳定失败。应统一状态转换契约，并用一个暂停后取消的用例验证。
+  已修复：`stop_task` 仅在目标状态为 Cancelled 时额外允许 Paused，补齐“已暂停 → 已取消”转换，与前端现有取消按钮保持一致。重复暂停及对 Completed、Failed、Cancelled 任务执行暂停/取消仍返回 InvalidState；继续使用现有任务锁、取消通知和持久化流程。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:123](E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:123)；[E:/ppxb/jm-boom/server/src/download/manager.rs:262](E:/ppxb/jm-boom/server/src/download/manager.rs:262)。
+  验证：新增 2 个回归测试。正向测试在旧代码上复现暂停后取消被拒绝，修复后验证返回列表和 SQLite 状态均为 Cancelled，并保留总页数、已完成页数及 generation。反向测试验证重复暂停和终态任务操作被拒绝，且内存与持久化状态不被改动。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:125](E:/ppxb/jm-boom/web/src/features/downloads/download-task-card.tsx:125)；[E:/ppxb/jm-boom/server/src/download/manager.rs:272](E:/ppxb/jm-boom/server/src/download/manager.rs:272)；[E:/ppxb/jm-boom/server/src/download/manager.rs:423](E:/ppxb/jm-boom/server/src/download/manager.rs:423)；[E:/ppxb/jm-boom/server/src/download/manager.rs:454](E:/ppxb/jm-boom/server/src/download/manager.rs:454)。
 
 - [ ] **05 · P2 · 阅读进度保存失败后丢失待保存记录**
 
@@ -337,7 +339,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 3 项修复后重新执行了后端基线与 diff 检查。前端未改动，以下前端结果沿用初次审计记录。
+第 4 项修复后重新执行了后端基线与 diff 检查。前端未改动，以下前端结果沿用初次审计记录。
 
 | 命令 | 结果 |
 | --- | --- |
@@ -346,7 +348,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 | web：bun run fmt:check | 未通过：128 个文件被报告，工作区恰有 128 个 CRLF 源文件；抽样仅替换为 LF 后与格式化输出完全一致。Git 索引样本是 LF，core.autocrlf=true，不能据此断言 128 个文件都有源码风格问题。 |
 | web：bun run build | 通过 |
 | web：bun test | 10 个测试通过 |
-| server：cargo test --locked | 76 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个和第 3 项新增的 3 个回归测试 |
+| server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
 | 根目录：git diff --check | 通过 |
@@ -361,4 +363,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 3 条已修复、47 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 4 条已修复、46 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。

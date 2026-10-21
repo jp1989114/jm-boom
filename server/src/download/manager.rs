@@ -269,10 +269,12 @@ impl DownloadManager {
         let snapshot = {
             let mut tasks = self.tasks.write().await;
             let task = tasks.get_mut(task_id).ok_or(DownloadError::NotFound)?;
-            if !matches!(
+            let can_stop = matches!(
                 task.status,
                 DownloadStatus::Queued | DownloadStatus::Running
-            ) {
+            ) || (task.status == DownloadStatus::Paused
+                && status == DownloadStatus::Cancelled);
+            if !can_stop {
                 return Err(invalid_state(operation, task.status));
             }
             task.status = status;
@@ -413,6 +415,72 @@ mod tests {
             manager.pause("task-transitions").await,
             Err(DownloadError::InvalidState { .. })
         ));
+
+        cleanup(manager, root).await;
+    }
+
+    #[tokio::test]
+    async fn cancel_paused_task_preserves_progress_and_persists_status() {
+        let db = test_db().await;
+        let (manager, root) = test_manager("cancel-paused", db).await;
+        let mut task = test_task("task-paused", DownloadStatus::Running, 1);
+        task.total_pages = 12;
+        task.completed_pages = 5;
+        task.eta_seconds = Some(30);
+        task.speed_bytes_per_second = 1024;
+        insert_task(&manager, task).await;
+
+        manager
+            .pause("task-paused")
+            .await
+            .expect("pause running task");
+        let result = manager
+            .cancel("task-paused")
+            .await
+            .expect("cancel paused task");
+        assert_eq!(result.tasks[0].status, DownloadStatus::Cancelled);
+        let cancelled = persisted_task(&manager, "task-paused").await;
+        assert_eq!(cancelled.status, DownloadStatus::Cancelled);
+        assert_eq!(cancelled.total_pages, 12);
+        assert_eq!(cancelled.completed_pages, 5);
+        assert_eq!(cancelled.generation, 1);
+        assert_eq!(cancelled.eta_seconds, None);
+        assert_eq!(cancelled.speed_bytes_per_second, 0);
+
+        cleanup(manager, root).await;
+    }
+
+    #[tokio::test]
+    async fn stop_rejects_repeated_pause_and_terminal_states() {
+        let db = test_db().await;
+        let (manager, root) = test_manager("invalid-stops", db).await;
+        for status in [
+            DownloadStatus::Paused,
+            DownloadStatus::Completed,
+            DownloadStatus::Failed,
+            DownloadStatus::Cancelled,
+        ] {
+            let task_id = format!("task-{status}");
+            insert_task(&manager, test_task(&task_id, status, 1)).await;
+            assert!(matches!(
+                manager.pause(&task_id).await,
+                Err(DownloadError::InvalidState {
+                    operation: "pause",
+                    ..
+                })
+            ));
+            if status != DownloadStatus::Paused {
+                assert!(matches!(
+                    manager.cancel(&task_id).await,
+                    Err(DownloadError::InvalidState {
+                        operation: "cancel",
+                        ..
+                    })
+                ));
+            }
+            assert_eq!(task_snapshot(&manager, &task_id).await.status, status);
+            assert_eq!(persisted_task(&manager, &task_id).await.status, status);
+        }
 
         cleanup(manager, root).await;
     }
