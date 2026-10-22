@@ -1,8 +1,8 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项已修复，其余 38 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项已修复，第 13 项待确认，其余 37 项待处理。
 
-P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
+P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
 本次以静态审查为主，运行了项目验证基线并对三个行为做了最小复现。没有执行浏览器视觉验收或并发压力测试，因此性能项描述的是代码中的成本来源及触发条件，不代表已经测得线上延迟。shadcn 允许通过 className 定制；合理布局扩展、原生语义标签和保护并发/文件完整性的检查不自动构成问题。
 
@@ -104,9 +104,11 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:43](E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:43)；[E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:61](E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:61)；[E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.integration.test.tsx:162](E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.integration.test.tsx:162)。
 
-- [ ] **13 · P2 · 每周推荐仅请求第一页，后续内容没有入口**
+- [ ] **13 · 待确认 · 每周推荐的上游分页行为**
 
-  接口和客户端均支持 `page` 并返回 `total`，但 WeeklyPage 的 search/queryKey 没有页码，调用 `getWeekItems` 时一直使用默认第 1 页，也没有分页或加载更多。当结果超过一页时，后续漫画不可达。应补齐这一页自身的翻页逻辑，不与其他探索路由强行合并。
+  原判断仅依据客户端与服务端接受 `page` 参数，不能据此确认上游实际分页或当前存在内容遗漏。2026-10-22 通过内置上游端点匿名核对期数 262、261、260、197、132、1 的三种类型，共 18 组数据，第一页返回条数均等于 `total`（0 至 20 条）。其中 10 组比较第 1、2 页的漫画 ID 列表，结果完全相同；期数 262 的 manga 类型第 3 页也相同。
+
+  当前样本已返回总数所指的完整集合，未发现需要翻页的数据，因此暂不添加分页器。该结果不证明所有期数或未来接口都不分页；若出现 `total > items.length` 的实际样本，应先核实不同页返回不同内容及每页容量，再补齐页码、查询缓存键和分页器，避免产生重复页或错误的末页判断。
 
   完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:81](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:81)；[E:/ppxb/jm-boom/web/src/lib/api/home.ts:103](E:/ppxb/jm-boom/web/src/lib/api/home.ts:103)；[E:/ppxb/jm-boom/web/src/lib/query-keys.ts:24](E:/ppxb/jm-boom/web/src/lib/query-keys.ts:24)；[E:/ppxb/jm-boom/server/src/application/comic/home/mod.rs:178](E:/ppxb/jm-boom/server/src/application/comic/home/mod.rs:178)。
 
@@ -379,4 +381,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 12 条已修复、38 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条审计记录，其中 12 条已修复、1 条待确认、37 条待处理；原生控件补充、验证记录和优化边界不计入条数。
