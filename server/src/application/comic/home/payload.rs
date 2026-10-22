@@ -64,7 +64,7 @@ pub(super) struct WeekComicsPayload {
     pub(super) list: Vec<ComicListPayload>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct ComicListPayload {
     #[serde(default, deserialize_with = "string_from_any")]
     pub(super) id: String,
@@ -82,7 +82,7 @@ pub(super) struct ComicListPayload {
     pub(super) category_sub: Option<CategoryTag>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct CategoryTag {
     #[serde(default, deserialize_with = "string_from_any")]
     pub(super) title: String,

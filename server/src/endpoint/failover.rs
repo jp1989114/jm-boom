@@ -5,7 +5,7 @@ use std::{collections::HashSet, future::Future, pin::Pin, time::Instant};
 const MAX_REQUEST_ENDPOINT_ATTEMPTS: usize = 4;
 
 impl EndpointManager {
-    pub(super) async fn request_candidates(&self) -> Vec<String> {
+    pub(crate) async fn request_candidates(&self) -> Vec<String> {
         let inner = self.inner.read().await;
         let mut candidates = Vec::new();
 

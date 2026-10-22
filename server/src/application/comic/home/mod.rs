@@ -1,12 +1,20 @@
 mod payload;
 mod section;
 
+#[cfg(test)]
+mod tests;
+
 use super::ComicService;
 use crate::{domain::comic::ComicSummary, jm::JmResult};
 use payload::{ComicListPayload, WeekComicsPayload, WeekPayload};
 
 pub(super) const PAGE_SIZE: usize = 20;
 pub(super) const PROMOTE_PAGE_SIZE: usize = 27;
+
+pub(super) struct SourcePage {
+    items: Vec<ComicListPayload>,
+    total: u32,
+}
 
 pub(crate) struct HomeFeed {
     pub(crate) sections: Vec<HomeFeedSection>,

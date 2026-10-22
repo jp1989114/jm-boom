@@ -21,7 +21,13 @@ const USER_AGENT: &str = "Mozilla/5.0 (Linux; Android 13; jm-boom Build/TQ1A.230
 /// JM API client
 pub struct JmClient {
     pub(crate) client: Client,
-    jwt_token: Arc<RwLock<Option<String>>>,
+    auth: Arc<RwLock<RequestAuth>>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct RequestAuth {
+    pub(crate) generation: u64,
+    token: Option<String>,
 }
 
 impl JmClient {
@@ -29,7 +35,7 @@ impl JmClient {
     pub fn new() -> JmResult<Self> {
         Ok(Self {
             client: get_or_create_client()?,
-            jwt_token: Arc::new(RwLock::new(None)),
+            auth: Arc::new(RwLock::new(RequestAuth::default())),
         })
     }
 
@@ -40,6 +46,21 @@ impl JmClient {
         path: &str,
         query: &[(&str, String)],
     ) -> JmResult<T> {
+        let auth = self.request_auth().await;
+        self.get_with_auth(endpoint, path, query, &auth).await
+    }
+
+    pub(crate) async fn request_auth(&self) -> RequestAuth {
+        self.auth.read().await.clone()
+    }
+
+    pub(crate) async fn get_with_auth<T: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        path: &str,
+        query: &[(&str, String)],
+        auth: &RequestAuth,
+    ) -> JmResult<T> {
         let signature = JmRequestSignature::new();
         let url = format!("{endpoint}/{path}");
 
@@ -48,7 +69,7 @@ impl JmClient {
             .get(&url)
             .apply_request_signature(&url, &signature)?
             .query(query);
-        if let Some(jwt) = self.jwt_token.read().await.as_ref() {
+        if let Some(jwt) = auth.token.as_ref() {
             request = request.header("Authorization", format!("Bearer {jwt}"));
         }
         let response = request
@@ -74,7 +95,7 @@ impl JmClient {
             .apply_request_signature(&url, &signature)?
             .form(fields);
         if authenticated {
-            if let Some(jwt) = self.jwt_token.read().await.as_ref() {
+            if let Some(jwt) = self.auth.read().await.token.as_ref() {
                 request = request.header("Authorization", format!("Bearer {jwt}"));
             }
         }
@@ -87,7 +108,9 @@ impl JmClient {
     }
 
     pub async fn set_jwt_token(&self, token: Option<String>) {
-        *self.jwt_token.write().await = token;
+        let mut auth = self.auth.write().await;
+        auth.token = token;
+        auth.generation = auth.generation.wrapping_add(1);
     }
 
     /// Search comics

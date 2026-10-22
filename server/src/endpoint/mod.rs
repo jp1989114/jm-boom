@@ -138,6 +138,14 @@ impl EndpointManager {
         endpoint_state(&inner)
     }
 
+    #[cfg(test)]
+    pub(crate) async fn set_probes_for_test(&self, probes: Vec<EndpointProbe>) {
+        let mut inner = self.inner.write().await;
+        inner.endpoints = probes;
+        inner.probe_completed = true;
+        select_current_endpoint(&mut inner);
+    }
+
     pub async fn refresh(&self) -> EndpointState {
         let _refresh = self.refresh_lock.lock().await;
         let mut candidates = discovery::discover_candidates(&self.client).await;

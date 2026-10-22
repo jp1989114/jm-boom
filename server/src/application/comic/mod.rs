@@ -11,19 +11,34 @@ pub(crate) use search::{ComicSearch, ComicSearchRequest};
 use crate::{
     domain::{comic::ComicDetail, reader::ChapterManifest},
     endpoint::{request_with_failover, EndpointManager},
+    expiring_cache::ExpiringCache,
     jm::{JmClient, JmResult},
+    keyed_lock::KeyedLock,
 };
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+
+const SOURCE_PAGE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+const SOURCE_PAGE_CACHE_MAX_ENTRIES: usize = 128;
 
 #[derive(Clone)]
 pub struct ComicService {
     jm: Arc<JmClient>,
     endpoints: Arc<EndpointManager>,
+    source_pages: Arc<ExpiringCache<Arc<home::SourcePage>>>,
+    source_page_locks: KeyedLock,
 }
 
 impl ComicService {
     pub fn new(jm: Arc<JmClient>, endpoints: Arc<EndpointManager>) -> Self {
-        Self { jm, endpoints }
+        Self {
+            jm,
+            endpoints,
+            source_pages: Arc::new(ExpiringCache::new(
+                SOURCE_PAGE_CACHE_TTL,
+                SOURCE_PAGE_CACHE_MAX_ENTRIES,
+            )),
+            source_page_locks: KeyedLock::new(),
+        }
     }
 
     pub async fn get_comic_detail(&self, comic_id: String) -> JmResult<ComicDetail> {

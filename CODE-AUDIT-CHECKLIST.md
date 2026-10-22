@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项及第 16 至 18 项已修复，第 13 项待确认，其余 33 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项及第 22 项已修复，第 13 项待确认，其余 32 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -170,11 +170,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:85](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:85)；[E:/ppxb/jm-boom/web/src/lib/api/download.ts:75](E:/ppxb/jm-boom/web/src/lib/api/download.ts:75)；[E:/ppxb/jm-boom/server/src/api/downloads.rs:48](E:/ppxb/jm-boom/server/src/api/downloads.rs:48)；[E:/ppxb/jm-boom/server/src/download/manager.rs:228](E:/ppxb/jm-boom/server/src/download/manager.rs:228)。
 
-- [ ] **22 · P2 · 上游大页被切成小页后，每次翻页重复下载同一份源数据**
+- [x] **22 · P2 · 上游大页被切成小页后，每次翻页重复下载同一份源数据（已修复）**
 
-  `weekly_section` 把上游 40 条拆为 20 条，latest/ranking 把 80 条拆为 20 条，但每个前端页都会重新请求对应上游页。因此依次查看 4 个 ranking 页会对同一源页发起 4 次请求。应在现有边界内缓存源页或复用源页结果，按端点、筛选与必要的账号上下文区分缓存。
+  已修复：连载更新、最新和排行榜的上游整页响应复用现有 ExpiringCache 与 KeyedLock，缓存有效期 5 分钟、最多 128 个源页，服务克隆共享缓存，并合并同一源页的并发请求。缓存区分实际来源端点、接口、筛选/排序/日期、上游页码和认证代次；固定请求凭据快照，避免登录状态在请求或故障切换期间变化时混用结果。缓存命中沿用现有候选端点优先级，不报告网络成功或改写测速延迟；错误不缓存。每个响应仍仅切出并克隆 20 条，保留总数、末页判断和 API 映射边界。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:65](E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:65)；[E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:110](E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:110)；[E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:136](E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:136)；[E:/ppxb/jm-boom/server/src/application/comic/mod.rs:50](E:/ppxb/jm-boom/server/src/application/comic/mod.rs:50)。
+  验证：新增 12 个本地 HTTP 模拟回归测试，覆盖 40/80 条源页切片、服务克隆与并发复用、筛选和账号/端点隔离、过期及容量淘汰、空结果、错误、测速保持、并发故障切换和请求期间切换账号。旧代码首批 8 个场景全部失败；修复后验证排行榜前四个小页只请求一次源页，连载更新前两个小页也只请求一次。后端全量 99 个测试、格式检查和 Clippy 通过。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/application/comic/mod.rs:20](E:/ppxb/jm-boom/server/src/application/comic/mod.rs:20)；[E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:185](E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:185)；[E:/ppxb/jm-boom/server/src/jm/client.rs:53](E:/ppxb/jm-boom/server/src/jm/client.rs:53)；[E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:187](E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:187)；[E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:476](E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:476)。
 
 - [ ] **23 · P2 · 评论接口为前端不展示的头像串行等待图片域名查询**
 
@@ -365,16 +367,16 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 18 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 17 项修复后的验证记录。
+第 22 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。前端未改动，以下前端结果沿用第 18 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 113 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个登录相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 第 18 项验证时未通过：其余 113 个现有 CRLF 源码文件被报告；该项修改和新增的 2 个登录相关源码/测试文件单独检查通过。本次未修改前端文件。 |
 | web：bun run build | 通过 |
 | web：bun test | 107 个测试通过，包含第 18 项新增的 31 个登录跳转回归场景 |
-| server：cargo test --locked | 87 个测试通过，包含第 17 项新增的 9 个阅读图片缓存回归测试 |
+| server：cargo test --locked | 99 个测试通过，包含第 22 项新增的 12 个上游源页缓存回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
 | 根目录：git diff --check | 通过 |
@@ -389,4 +391,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 16 条已修复、1 条待确认、33 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 17 条已修复、1 条待确认、32 条待处理；原生控件补充、验证记录和优化边界不计入条数。

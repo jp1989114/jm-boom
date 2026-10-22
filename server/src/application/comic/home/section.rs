@@ -1,9 +1,14 @@
 use super::{
     current_china_weekday,
     payload::{CategoryPayload, ComicListPayload, PromotePayload, SectionPayload, WeeklyPayload},
-    ComicService, HomeSectionMode, HomeSectionRequest, PAGE_SIZE, PROMOTE_PAGE_SIZE,
+    ComicService, HomeSectionMode, HomeSectionRequest, SourcePage, PAGE_SIZE, PROMOTE_PAGE_SIZE,
 };
-use crate::jm::JmResult;
+use crate::{
+    endpoint::request_with_failover,
+    jm::{JmError, JmResult},
+};
+use serde::de::DeserializeOwned;
+use std::sync::Arc;
 
 impl ComicService {
     pub(super) async fn request_section_list(
@@ -73,35 +78,32 @@ impl ComicService {
         } else {
             request.category.clone()
         };
-        let payload: WeeklyPayload = self
-            .with_failover(move |client, endpoint| {
-                let category = category.clone();
-                Box::pin(async move {
-                    client
-                        .get(
-                            endpoint,
-                            "serialization",
-                            &[
-                                ("date", date.to_string()),
-                                ("type", category),
-                                ("page", request_page.to_string()),
-                            ],
-                        )
-                        .await
-                })
-            })
+        let payload = self
+            .fetch_source_page(
+                "serialization",
+                vec![
+                    ("date", date.to_string()),
+                    ("type", category),
+                    ("page", request_page.to_string()),
+                ],
+                |payload: WeeklyPayload| SourcePage {
+                    items: payload.list,
+                    total: 0,
+                },
+            )
             .await?;
-        let count = payload.list.len();
+        let count = payload.items.len();
 
         Ok(SectionPayload {
             page_size: PAGE_SIZE as u32,
             total: 0,
             has_more: count > offset + PAGE_SIZE || count >= 40,
             items: payload
-                .list
-                .into_iter()
+                .items
+                .iter()
                 .skip(offset)
                 .take(PAGE_SIZE)
+                .cloned()
                 .collect(),
         })
     }
@@ -109,22 +111,26 @@ impl ComicService {
     async fn latest_section(&self, start: usize) -> JmResult<SectionPayload> {
         let request_page = (start / 80) as u32;
         let offset = start % 80;
-        let items: Vec<ComicListPayload> = self
-            .with_failover(move |client, endpoint| {
-                Box::pin(async move {
-                    client
-                        .get(endpoint, "latest", &[("page", request_page.to_string())])
-                        .await
-                })
-            })
+        let payload = self
+            .fetch_source_page(
+                "latest",
+                vec![("page", request_page.to_string())],
+                |items: Vec<ComicListPayload>| SourcePage { items, total: 0 },
+            )
             .await?;
-        let count = items.len();
+        let count = payload.items.len();
 
         Ok(SectionPayload {
             page_size: PAGE_SIZE as u32,
             total: 0,
             has_more: count > offset + PAGE_SIZE || count >= 80,
-            items: items.into_iter().skip(offset).take(PAGE_SIZE).collect(),
+            items: payload
+                .items
+                .iter()
+                .skip(offset)
+                .take(PAGE_SIZE)
+                .cloned()
+                .collect(),
         })
     }
 
@@ -145,26 +151,21 @@ impl ComicService {
         } else {
             request.order.clone()
         };
-        let payload: CategoryPayload = self
-            .with_failover(move |client, endpoint| {
-                let category = category.clone();
-                let order = order.clone();
-                Box::pin(async move {
-                    client
-                        .get(
-                            endpoint,
-                            "categories/filter",
-                            &[
-                                ("page", request_page.to_string()),
-                                ("c", category),
-                                ("o", order),
-                            ],
-                        )
-                        .await
-                })
-            })
+        let payload = self
+            .fetch_source_page(
+                "categories/filter",
+                vec![
+                    ("page", request_page.to_string()),
+                    ("c", category),
+                    ("o", order),
+                ],
+                |payload: CategoryPayload| SourcePage {
+                    items: payload.content,
+                    total: payload.total,
+                },
+            )
             .await?;
-        let count = payload.content.len();
+        let count = payload.items.len();
 
         Ok(SectionPayload {
             page_size: PAGE_SIZE as u32,
@@ -172,11 +173,61 @@ impl ComicService {
             has_more: count > offset + PAGE_SIZE
                 || (payload.total > 0 && start + PAGE_SIZE < payload.total as usize),
             items: payload
-                .content
-                .into_iter()
+                .items
+                .iter()
                 .skip(offset)
                 .take(PAGE_SIZE)
+                .cloned()
                 .collect(),
         })
+    }
+
+    async fn fetch_source_page<T: DeserializeOwned + Send + 'static>(
+        &self,
+        path: &'static str,
+        query: Vec<(&'static str, String)>,
+        map: fn(T) -> SourcePage,
+    ) -> JmResult<Arc<SourcePage>> {
+        let auth = self.jm.request_auth().await;
+        let scope = serde_json::to_string(&(path, &query, auth.generation))
+            .map_err(|error| JmError::Payload(error.to_string()))?;
+        if let Some(page) = self.cached_source_page(&scope).await {
+            return Ok(page);
+        }
+
+        // Keep failover waiters together, even when the first attempt changes the active endpoint.
+        let _guard = self.source_page_locks.lock(&scope).await;
+        if let Some(page) = self.cached_source_page(&scope).await {
+            return Ok(page);
+        }
+
+        let (endpoint, page) =
+            request_with_failover(&self.jm, &self.endpoints, move |client, endpoint| {
+                let query = query.clone();
+                let auth = auth.clone();
+                Box::pin(async move {
+                    client
+                        .get_with_auth::<T>(endpoint, path, &query, &auth)
+                        .await
+                        .map(map)
+                        .map(Arc::new)
+                })
+            })
+            .await?;
+        self.source_pages
+            .insert(format!("{endpoint}|{scope}"), page.clone())
+            .await;
+        Ok(page)
+    }
+
+    async fn cached_source_page(&self, scope: &str) -> Option<Arc<SourcePage>> {
+        let endpoint = self
+            .endpoints
+            .request_candidates()
+            .await
+            .into_iter()
+            .next()?;
+        // A cache hit must not be reported as a network success or alter probe latency.
+        self.source_pages.get(&format!("{endpoint}|{scope}")).await
     }
 }
