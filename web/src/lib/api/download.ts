@@ -52,8 +52,8 @@ export async function enqueueComicDownload(
   return apiClient.post('/api/downloads', request)
 }
 
-export async function listDownloadTasks(): Promise<DownloadTaskListResult> {
-  return apiClient.get('/api/downloads')
+export async function listDownloadTasks(signal?: AbortSignal): Promise<DownloadTaskListResult> {
+  return apiClient.get('/api/downloads', undefined, { signal })
 }
 
 export async function listDownloadedChapters(): Promise<DownloadedChapterListResult> {

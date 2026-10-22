@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项及第 14 项已修复，第 13 项待确认，其余 36 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14、16 项已修复，第 13 项待确认，其余 35 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -126,11 +126,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:62](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:62)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:146](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:146)。
 
-- [ ] **16 · P2 · 下载 mutation 的缓存结果可能被较早的轮询响应覆盖**
+- [x] **16 · P2 · 下载 mutation 的缓存结果可能被较早的轮询响应覆盖（已修复）**
 
-  任务操作成功后直接 `setQueryData`，没有协调已进行中的列表请求。先开始的轮询若晚于删除、暂停响应返回，可覆盖新快照；删除后的无活动任务还可能停止后续轮询。应取消或隔离旧查询，并在操作结束后校准列表，保留现有轮询方案。
+  已修复：下载列表查询向 fetch 传递 AbortSignal。删除、暂停、恢复、取消及详情页新建下载，在操作开始时取消旧列表查询，收尾时再次取消操作期间发起的查询；成功响应先写入缓存，随后重新查询服务端列表。失败也会执行列表校准，下载管理操作同时使离线章节缓存失效，覆盖批量删除部分成功的情况。未挂载的列表标记为失效，进入下载页时刷新。保留原有 1 秒轮询和服务端调度。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:63](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:63)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-download.ts:29](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-download.ts:29)；[E:/ppxb/jm-boom/web/src/lib/api/client.ts:118](E:/ppxb/jm-boom/web/src/lib/api/client.ts:118)。
+  验证：新增 10 个实际 React Hook/QueryClient 回归测试，以可控响应顺序覆盖删除、暂停、恢复、取消、新建下载、校准请求失败、批量删除部分失败、无缓存首次加载、未挂载列表和并发操作响应逆序。模拟 fetch 在收到取消信号后仍返回旧响应，确认旧响应不会覆盖新缓存；成功后的校准失败也不会撤销已确认的操作结果。旧代码 10 个场景全部失败，修复后前端全量 76 个测试通过。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:31](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:31)；[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:76](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:76)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-download.ts:34](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-download.ts:34)；[E:/ppxb/jm-boom/web/src/lib/api/download.ts:55](E:/ppxb/jm-boom/web/src/lib/api/download.ts:55)；[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.test.tsx:182](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.test.tsx:182)。
 
 - [ ] **17 · P2 · 无需解扰的损坏图片可能被持久缓存，重试仍返回同一坏数据**
 
@@ -160,9 +162,9 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 - [ ] **21 · P2 · 下载批量删除实际是 N 次串行请求并接收 N 次完整列表**
 
-  `removeDownloadTasks` 逐个 await 单删 API，只消费最后一次结果；部分成功后若某次失败，前端还不会应用已完成删除的结果。应新增批量删除接口，一次提交 ID，由服务端完成 worker 停止及 manifest/目录清理，返回一次最终结果。
+  `removeDownloadTasks` 逐个 await 单删 API，只消费最后一次结果。部分失败后已会重新查询服务端列表，但串行多次请求与多份完整响应的成本仍存在。应新增批量删除接口，一次提交 ID，由服务端完成 worker 停止及 manifest/目录清理，返回一次最终结果。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:80](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:80)；[E:/ppxb/jm-boom/web/src/lib/api/download.ts:75](E:/ppxb/jm-boom/web/src/lib/api/download.ts:75)；[E:/ppxb/jm-boom/server/src/api/downloads.rs:48](E:/ppxb/jm-boom/server/src/api/downloads.rs:48)；[E:/ppxb/jm-boom/server/src/download/manager.rs:228](E:/ppxb/jm-boom/server/src/download/manager.rs:228)。
+  完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:85](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:85)；[E:/ppxb/jm-boom/web/src/lib/api/download.ts:75](E:/ppxb/jm-boom/web/src/lib/api/download.ts:75)；[E:/ppxb/jm-boom/server/src/api/downloads.rs:48](E:/ppxb/jm-boom/server/src/api/downloads.rs:48)；[E:/ppxb/jm-boom/server/src/download/manager.rs:228](E:/ppxb/jm-boom/server/src/download/manager.rs:228)。
 
 - [ ] **22 · P2 · 上游大页被切成小页后，每次翻页重复下载同一份源数据**
 
@@ -176,9 +178,9 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/server/src/application/comic/comments.rs:38](E:/ppxb/jm-boom/server/src/application/comic/comments.rs:38)；[E:/ppxb/jm-boom/server/src/application/comic/comments.rs:99](E:/ppxb/jm-boom/server/src/application/comic/comments.rs:99)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:141](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:141)。
 
-- [ ] **24 · P2 · 普通查询没有向 fetch 传递 TanStack Query 的取消信号**
+- [ ] **24 · P2 · 多数普通查询尚未向 fetch 传递 TanStack Query 的取消信号**
 
-  `apiClient.get` 不接受 RequestInit/AbortSignal，搜索、列表和 manifest 的 queryFn 也未消费 signal。快速切换关键词、筛选或章节后，失去消费者的旧请求仍继续占用连接和上游资源。应贯通查询取消信号，保留确有用途的预取请求和历史 keepalive 写入。
+  `apiClient.get` 已接受 RequestInit，下载任务列表已消费并传递 signal；搜索、其他列表和 manifest 的 queryFn 仍未贯通取消信号。快速切换关键词、筛选或章节后，这些失去消费者的旧请求仍继续占用连接和上游资源。应补齐剩余查询，保留确有用途的预取请求和历史 keepalive 写入。
 
   完整路径：[E:/ppxb/jm-boom/web/src/lib/api/client.ts:118](E:/ppxb/jm-boom/web/src/lib/api/client.ts:118)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62](E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:9](E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:9)；[E:/ppxb/jm-boom/web/src/lib/api/reader.ts:15](E:/ppxb/jm-boom/web/src/lib/api/reader.ts:15)。
 
@@ -359,15 +361,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 14 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 16 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 117 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个每周推荐相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 114 个现有 CRLF 源码文件仍被报告。本次修改和新增的 5 个下载查询相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 66 个测试通过，包含第 14 项新增的 8 个每周推荐页面挂载回归测试 |
+| web：bun test | 76 个测试通过，包含第 16 项新增的 10 个下载缓存同步回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -383,4 +385,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 13 条已修复、1 条待确认、36 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 14 条已修复、1 条待确认、35 条待处理；原生控件补充、验证记录和优化边界不计入条数。

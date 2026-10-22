@@ -28,7 +28,7 @@ export function useDownloadTasks() {
   const [filter, setFilter] = useState<DownloadFilter>('all')
   const tasks = useQuery({
     queryKey: queryKeys.downloadTasks(),
-    queryFn: listDownloadTasks,
+    queryFn: ({ signal }) => listDownloadTasks(signal),
     refetchInterval: query =>
       hasActiveTasks(query.state.data?.tasks ?? EMPTY_DOWNLOAD_TASKS) ? 1000 : false,
     staleTime: 10_000,
@@ -68,12 +68,17 @@ function useTaskMutation<TVariables>(
 
   return useMutation({
     mutationFn,
-    onSuccess: result => {
-      queryClient.setQueryData(queryKeys.downloadTasks(), result)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.downloadedChapters() })
+    onMutate: () => queryClient.cancelQueries({ queryKey: queryKeys.downloadTasks(), exact: true }),
+    onSuccess: () => {
       toast.success(message)
     },
-    onError: showError
+    onError: showError,
+    onSettled: async result => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.downloadTasks(), exact: true })
+      if (result) queryClient.setQueryData(queryKeys.downloadTasks(), result)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.downloadedChapters() })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.downloadTasks(), exact: true })
+    }
   })
 }
 

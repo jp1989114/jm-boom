@@ -23,13 +23,18 @@ export function useComicDownload(comic: ComicDetail, sortedChapters: ComicChapte
         comicTitle: comic.title,
         chapters: selectedChapters
       }),
-    onSuccess: result => {
-      queryClient.setQueryData(queryKeys.downloadTasks(), result)
+    onMutate: () => queryClient.cancelQueries({ queryKey: queryKeys.downloadTasks(), exact: true }),
+    onSuccess: () => {
       setIsOpen(false)
       toast.success('已加入下载队列，可在下载页查看进度')
     },
     onError: error => {
       toast.error(error instanceof Error ? error.message : '下载任务创建失败')
+    },
+    onSettled: async result => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.downloadTasks(), exact: true })
+      if (result) queryClient.setQueryData(queryKeys.downloadTasks(), result)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.downloadTasks(), exact: true })
     }
   })
 

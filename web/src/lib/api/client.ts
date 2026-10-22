@@ -118,7 +118,7 @@ function isAbortError(error: unknown) {
 }
 
 export const apiClient = {
-  get: <T>(path: string, params?: Record<string, unknown>) => {
+  get: <T>(path: string, params?: Record<string, unknown>, options?: RequestInit) => {
     const query = params
       ? '?' +
         new URLSearchParams(
@@ -134,7 +134,7 @@ export const apiClient = {
         ).toString()
       : ''
 
-    return request<T>(`${path}${query}`)
+    return request<T>(`${path}${query}`, options)
   },
 
   post: <T>(path: string, data?: unknown) =>
