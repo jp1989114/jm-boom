@@ -76,7 +76,7 @@ export function SettingsPage() {
             isLoading={account.isLoading}
             isSaving={saveAccount.isPending}
             isClearing={removeAccount.isPending}
-            onSave={input => saveAccount.mutate(input)}
+            onSave={(input, onSuccess) => saveAccount.mutate(input, { onSuccess })}
             onClear={() => removeAccount.mutate()}
           />
 

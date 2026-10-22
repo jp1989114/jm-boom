@@ -6,7 +6,7 @@ import {
   SaveIcon,
   Trash2Icon
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,25 +27,34 @@ export function AccountSection({
   isLoading: boolean
   isSaving: boolean
   isClearing: boolean
-  onSave: (input: {
-    username: string
-    password?: string
-    autoLogin: boolean
-    autoSignIn: boolean
-  }) => void
+  onSave: (
+    input: {
+      username: string
+      password?: string
+      autoLogin: boolean
+      autoSignIn: boolean
+    },
+    onSuccess: (state: AccountState) => void
+  ) => void
   onClear: () => void
 }) {
-  const [username, setUsername] = useState('')
+  const savedUsernameRef = useRef(state?.username)
+  const [username, setUsername] = useState(state?.username ?? '')
   const [password, setPassword] = useState('')
-  const [autoLogin, setAutoLogin] = useState(true)
-  const [autoSignIn, setAutoSignIn] = useState(true)
+  const [autoLogin, setAutoLogin] = useState(state?.autoLogin ?? true)
+  const [autoSignIn, setAutoSignIn] = useState(state?.autoSignIn ?? true)
+
+  const resetForm = useCallback((savedState: AccountState) => {
+    savedUsernameRef.current = savedState.username
+    setUsername(savedState.username ?? '')
+    setPassword('')
+    setAutoLogin(savedState.autoLogin)
+    setAutoSignIn(savedState.autoSignIn)
+  }, [])
 
   useEffect(() => {
-    setUsername(state?.username ?? '')
-    setPassword('')
-    setAutoLogin(state?.autoLogin ?? true)
-    setAutoSignIn(state?.autoSignIn ?? true)
-  }, [state])
+    if (state && state.username !== savedUsernameRef.current) resetForm(state)
+  }, [state, resetForm])
 
   const isBusy = isLoading || isSaving || isClearing
   const canSave = username.trim().length > 0 && (password.trim().length > 0 || state?.username)
@@ -112,7 +121,10 @@ export function AccountSection({
             size="sm"
             disabled={isBusy || !canSave}
             onClick={() =>
-              onSave({ username, password: password || undefined, autoLogin, autoSignIn })
+              onSave(
+                { username, password: password || undefined, autoLogin, autoSignIn },
+                resetForm
+              )
             }
           >
             {isSaving ? (

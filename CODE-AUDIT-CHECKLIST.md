@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1、2、3、4、5、6、7、8、9 项已修复，其余 41 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 10 项已修复，其余 40 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -80,11 +80,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:34](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:34)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:64](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:64)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:17](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:17)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:48](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-favorite.ts:48)；[E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:107](E:/ppxb/jm-boom/web/src/features/comic-detail/hero.tsx:107)；[E:/ppxb/jm-boom/web/src/features/comic-detail/floating-actions.tsx:24](E:/ppxb/jm-boom/web/src/features/comic-detail/floating-actions.tsx:24)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-reader-preload.ts:12](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-reader-preload.ts:12)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.test.tsx:202](E:/ppxb/jm-boom/web/src/features/comic-detail/page.test.tsx:202)。
 
-- [ ] **10 · P2 · 账号表单在后台状态更新时覆盖用户未保存输入**
+- [x] **10 · P2 · 账号表单在后台状态更新时覆盖用户未保存输入（已修复）**
 
-  `AccountSection` 依赖整个 `state` 对象的 effect 会重置用户名、密码和两个开关。登录/签到状态轮询或窗口聚焦返回新状态时，正在编辑的草稿也会被清空。应仅在初次载入、账号身份变化或保存成功时重置表单，保留编辑中的值。
+  已修复：表单只在首次有效状态载入、已保存账号身份变化（含退出账号）或保存成功时重置。后台登录/签到状态与窗口聚焦刷新继续更新状态显示，保留用户名、密码和两个开关的草稿。保存成功通过 mutation 回调明确重置，即使返回状态与缓存相同，也会清空密码框；保存或退出失败保留输入。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:43](E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:43)；[E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:34](E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:34)。
+  验证：新增 7 个实际设置页挂载回归测试，均在 Strict Mode 下执行，覆盖首次加载、登录/签到状态刷新、窗口聚焦、同状态保存成功、保存失败及重试、账号身份切换和退出成败。旧代码在其中 4 个场景失败，修复后全部通过；前端全量 42 个测试通过。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:41](E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:41)；[E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:47](E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:47)；[E:/ppxb/jm-boom/web/src/features/settings/page.tsx:79](E:/ppxb/jm-boom/web/src/features/settings/page.tsx:79)；[E:/ppxb/jm-boom/web/src/features/settings/account-section.test.tsx:230](E:/ppxb/jm-boom/web/src/features/settings/account-section.test.tsx:230)。
 
 - [ ] **11 · P2 · 手动端点显示的延迟与可用状态可能属于另一个端点**
 
@@ -349,15 +351,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 09 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 10 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 122 个现有 CRLF 源码文件仍被报告。本次修改和新增的 6 个详情页相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 120 个现有 CRLF 源码文件仍被报告。本次修改和新增的 3 个账号设置相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 35 个测试通过，含第 05、06 项的 10 个、第 07 项的 4 个、第 08 项的 5 个和第 09 项新增的 6 个 React 挂载回归测试 |
+| web：bun test | 42 个测试通过，包含第 10 项新增的 7 个设置页挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -373,4 +375,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 9 条已修复、41 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 10 条已修复、40 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
