@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14、16、17 项已修复，第 13 项待确认，其余 34 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项及第 16 至 18 项已修复，第 13 项待确认，其余 33 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -142,11 +142,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/server/src/cache/mod.rs:158](E:/ppxb/jm-boom/server/src/cache/mod.rs:158)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:173](E:/ppxb/jm-boom/server/src/cache/mod.rs:173)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:247](E:/ppxb/jm-boom/server/src/cache/mod.rs:247)；[E:/ppxb/jm-boom/server/src/cache/tests.rs:157](E:/ppxb/jm-boom/server/src/cache/tests.rs:157)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:523](E:/ppxb/jm-boom/server/src/page_materializer.rs:523)。
 
-- [ ] **18 · P2 · 登录后的跳转校验允许反斜杠形式的外站跳转**
+- [x] **18 · P2 · 登录后的跳转校验允许反斜杠形式的外站跳转（已修复）**
 
-  `safeRedirect` 只排除 `//`；形如 `/\example.invalid` 的值仍通过，而浏览器 URL 规则会把它解析为 `https://example.invalid/`。已用 URL 解析器复现。应解析目标 URL 后验证 origin 与当前站点一致，再执行跳转。
+  已修复：`safeRedirect` 使用当前站点 origin 解析目标 URL，并要求解析后的 origin 完全一致。通过校验后直接使用完整 href，保留查询参数和锚点，避免规范化后的双斜杠路径被再次解释为外站地址。继续限制根路径形式的输入；外站、解析或路径解码失败，以及归一化/解码后指向登录页的目标统一返回书架。密码登录、已有访问权限和未启用门禁均使用同一校验。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/routes/login.tsx:104](E:/ppxb/jm-boom/web/src/routes/login.tsx:104)。
+  验证：新增 31 个实际登录页挂载回归场景，使用真实 Router 解码 redirect 参数，覆盖反斜杠、混合分隔符、控制字符、域名和端口变化、无效 URL、编码及大小写形式的登录页、正常阅读目标，以及三种进入路径和密码失败。旧实现已复现外站跳转与登录页循环校验缺口；修复后前端全量 107 个测试通过。测试文件使用 Router 忽略前缀。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/routes/login.tsx:35](E:/ppxb/jm-boom/web/src/routes/login.tsx:35)；[E:/ppxb/jm-boom/web/src/routes/login.tsx:59](E:/ppxb/jm-boom/web/src/routes/login.tsx:59)；[E:/ppxb/jm-boom/web/src/routes/login.tsx:105](E:/ppxb/jm-boom/web/src/routes/login.tsx:105)；[E:/ppxb/jm-boom/web/src/routes/-login.test.tsx:150](E:/ppxb/jm-boom/web/src/routes/-login.test.tsx:150)。
 
 - [ ] **19 · P2 · 账号密码加密使用公开的固定密钥，不能保护数据库中的凭据**
 
@@ -363,15 +365,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 17 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。前端未改动，以下前端结果沿用第 16 项修复后的验证记录。
+第 18 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 17 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 第 16 项验证时未通过：其余 114 个现有 CRLF 源码文件被报告；该项修改和新增的 5 个下载查询相关源码/测试文件单独检查通过。本次未修改前端文件。 |
+| web：bun run fmt:check | 未通过：其余 113 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个登录相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 76 个测试通过，包含第 16 项新增的 10 个下载缓存同步回归测试 |
+| web：bun test | 107 个测试通过，包含第 18 项新增的 31 个登录跳转回归场景 |
 | server：cargo test --locked | 87 个测试通过，包含第 17 项新增的 9 个阅读图片缓存回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -379,7 +381,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 格式环境涉及 [E:/ppxb/jm-boom/web/.oxfmtrc.json:1](E:/ppxb/jm-boom/web/.oxfmtrc.json:1)；建议另行统一仓库换行约定，不为此次审计批量改写源码。
 
-最小复现结果：末页禁用按钮处理仍将页码 3 改为 4；prefetchQuery 的 query 状态为 error 时外部 catch 未触发（第 12 项已改用 fetchQuery 修复）；反斜杠跳转路径通过现有检查并被 URL 解析为外站地址。复现未调用生产业务接口。
+最小复现结果：末页禁用按钮处理仍将页码 3 改为 4；prefetchQuery 的 query 状态为 error 时外部 catch 未触发（第 12 项已改用 fetchQuery 修复）；反斜杠跳转路径曾通过校验并被 URL 解析为外站地址（第 18 项已修复）。复现未调用生产业务接口。
 
 ## 优化边界
 
@@ -387,4 +389,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 15 条已修复、1 条待确认、34 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 16 条已修复、1 条待确认、33 条待处理；原生控件补充、验证记录和优化边界不计入条数。

@@ -103,7 +103,17 @@ function LoginPage() {
 }
 
 function safeRedirect(redirect: string | undefined) {
-  return redirect?.startsWith('/') && !redirect.startsWith('//') && !redirect.startsWith('/login')
-    ? redirect
-    : '/bookshelf'
+  const fallback = '/bookshelf'
+  if (!redirect?.startsWith('/') || redirect.startsWith('//')) return fallback
+
+  try {
+    const origin = window.location.origin
+    const target = new URL(redirect, origin)
+    if (target.origin !== origin || /^\/+login/i.test(decodeURIComponent(target.pathname))) {
+      return fallback
+    }
+    return target.href
+  } catch {
+    return fallback
+  }
 }
