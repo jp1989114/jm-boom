@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 10 项已修复，其余 40 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 10 项及第 12 项已修复，其余 39 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -94,11 +94,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:39](E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:39)。
 
-- [ ] **12 · P2 · 下一章预加载依赖不会执行的失败 catch**
+- [x] **12 · P2 · 下一章预加载依赖不会执行的失败 catch（已修复）**
 
-  TanStack Query 的 `prefetchQuery` 会吞掉请求错误，现有 `.catch` 无法清空 `prefetchedChapterRef`；失败章节在当前会话中被当作已尝试完成。最小复现已确认 query 状态为 error 时 catch 仍未触发。应使用可感知失败的调用方式或检查查询状态，并明确允许再次预加载的时机。
+  已修复：改用 `fetchQuery` 感知失败，成功后才将 manifest 的前 6 页交给现有图片预加载调度器。移除提前写入的已预加载标记，每轮仅对可重试的 API 错误在 5 秒、10 秒后各重试一次，无需继续翻页触发；永久错误或重试耗尽后停止。退出预加载条件、切章或卸载会清理重试定时器，重新满足条件可发起新一轮。保留共享查询与缓存，旧响应不再触发图片预加载，不取消其他读者共享的请求。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:35](E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:35)。
+  验证：新增 10 个实际 React Hook 挂载测试，覆盖失败后自动重试、重试间隔和上限、永久错误、重新进入预加载条件、切章、迟到响应、共享请求、卸载及 Strict Mode，并确认新鲜缓存与并发请求复用。旧实现已复现失败被当作成功且不重试；修复后前端全量 52 个测试通过。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:43](E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:43)；[E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:61](E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.ts:61)；[E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.integration.test.tsx:162](E:/ppxb/jm-boom/web/src/features/reader/use-next-chapter-prefetch.integration.test.tsx:162)。
 
 - [ ] **13 · P2 · 每周推荐仅请求第一页，后续内容没有入口**
 
@@ -351,15 +353,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 10 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 12 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 120 个现有 CRLF 源码文件仍被报告。本次修改和新增的 3 个账号设置相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 119 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个下一章预加载相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 42 个测试通过，包含第 10 项新增的 7 个设置页挂载回归测试 |
+| web：bun test | 52 个测试通过，包含第 12 项新增的 10 个下一章预加载挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -367,7 +369,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 格式环境涉及 [E:/ppxb/jm-boom/web/.oxfmtrc.json:1](E:/ppxb/jm-boom/web/.oxfmtrc.json:1)；建议另行统一仓库换行约定，不为此次审计批量改写源码。
 
-最小复现结果：末页禁用按钮处理仍将页码 3 改为 4；prefetchQuery 的 query 状态为 error 时外部 catch 未触发；反斜杠跳转路径通过现有检查并被 URL 解析为外站地址。复现未调用生产业务接口。
+最小复现结果：末页禁用按钮处理仍将页码 3 改为 4；prefetchQuery 的 query 状态为 error 时外部 catch 未触发（第 12 项已改用 fetchQuery 修复）；反斜杠跳转路径通过现有检查并被 URL 解析为外站地址。复现未调用生产业务接口。
 
 ## 优化边界
 
@@ -375,4 +377,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 10 条已修复、40 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 11 条已修复、39 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。

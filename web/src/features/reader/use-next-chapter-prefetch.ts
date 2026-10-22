@@ -1,11 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 
+import { ApiError } from '@/lib/api/client'
 import { getComicReadManifest } from '@/lib/api/reader'
 import { CACHE, READER } from '@/lib/constants'
 import { queryKeys } from '@/lib/query-keys'
 import { clearReaderPreloadScope, setReaderPreloadScope } from '@/lib/reader-preload'
 import type { ReaderChapterItem } from './types'
+
+const RETRY_DELAYS = [5000, 10_000]
 
 export function useNextChapterPrefetch({
   currentIndex,
@@ -19,7 +22,6 @@ export function useNextChapterPrefetch({
   stripPrefetchRequested?: boolean
 }) {
   const queryClient = useQueryClient()
-  const prefetchedChapterRef = useRef('')
   const nextReadId = nextChapter?.id ?? ''
   const preloadScope = `next-chapter:${nextReadId}`
   const shouldPrefetch =
@@ -32,46 +34,47 @@ export function useNextChapterPrefetch({
       return
     }
 
-    if (prefetchedChapterRef.current === nextReadId) {
-      return
-    }
-
-    prefetchedChapterRef.current = nextReadId
     let isActive = true
+    let retryCount = 0
+    let retryTimer: number | undefined
 
-    void queryClient
-      .prefetchQuery({
-        queryKey: queryKeys.readerManifest(nextReadId),
-        queryFn: () => getComicReadManifest({ readId: nextReadId }),
-        staleTime: CACHE.READER_STALE_TIME,
-        gcTime: CACHE.READER_GC_TIME,
-        retry: false
-      })
-      .then(() => {
+    async function prefetch() {
+      try {
+        const manifest = await queryClient.fetchQuery({
+          queryKey: queryKeys.readerManifest(nextReadId),
+          queryFn: () => getComicReadManifest({ readId: nextReadId }),
+          staleTime: CACHE.READER_STALE_TIME,
+          gcTime: CACHE.READER_GC_TIME,
+          retry: false
+        })
         if (!isActive) {
           return
         }
 
-        const manifest = queryClient.getQueryData<Awaited<ReturnType<typeof getComicReadManifest>>>(
-          queryKeys.readerManifest(nextReadId)
-        )
         setReaderPreloadScope(
           preloadScope,
-          manifest?.pages.slice(0, READER.PREFETCH_AHEAD_PAGES).map(page => page.path) ?? []
+          manifest.pages.slice(0, READER.PREFETCH_AHEAD_PAGES).map(page => page.path)
         )
-      })
-      .catch(error => {
-        if (isActive && prefetchedChapterRef.current === nextReadId) {
-          prefetchedChapterRef.current = ''
+      } catch (error) {
+        if (!isActive) return
+
+        const retryDelay = RETRY_DELAYS[retryCount]
+        if (error instanceof ApiError && error.retryable && retryDelay !== undefined) {
+          retryCount += 1
+          retryTimer = window.setTimeout(() => void prefetch(), retryDelay)
         }
 
         if (import.meta.env.DEV) {
           console.debug('Reader next chapter prefetch failed', error)
         }
-      })
+      }
+    }
+
+    void prefetch()
 
     return () => {
       isActive = false
+      window.clearTimeout(retryTimer)
     }
   }, [nextReadId, preloadScope, queryClient, shouldPrefetch])
 
