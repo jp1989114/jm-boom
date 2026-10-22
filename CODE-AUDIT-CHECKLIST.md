@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项已修复，第 13 项待确认，其余 37 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项及第 14 项已修复，第 13 项待确认，其余 36 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -112,11 +112,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:81](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:81)；[E:/ppxb/jm-boom/web/src/lib/api/home.ts:103](E:/ppxb/jm-boom/web/src/lib/api/home.ts:103)；[E:/ppxb/jm-boom/web/src/lib/query-keys.ts:24](E:/ppxb/jm-boom/web/src/lib/query-keys.ts:24)；[E:/ppxb/jm-boom/server/src/application/comic/home/mod.rs:178](E:/ppxb/jm-boom/server/src/application/comic/home/mod.rs:178)。
 
-- [ ] **14 · P2 · 每周筛选成功返回空数据时会永久显示骨架屏**
+- [x] **14 · P2 · 每周筛选成功返回空数据时会永久显示骨架屏（已修复）**
 
-  `!canLoadItems` 同时代表“筛选尚未返回”和“筛选已返回但没有可选项”；渲染分支把两者都当 loading。应使用 filters 的实际 pending/success 状态区分加载与空结果，并在空结果时显示 EmptyState。
+  已修复：根据筛选查询的 pending/success 状态区分加载和空结果。期数或类型为空时显示“暂无每周推荐”，同时结束筛选框及漫画区的占位动画；漫画请求必须在两组筛选项均非空后启用，地址栏残留 ID 不会绕过这一条件。筛选有效时保留列表加载、空漫画列表及两类请求各自的失败重试。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:76](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:76)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:167](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:167)。
+  验证：新增 8 个实际页面挂载回归测试，使用真实 Router 和 QueryClient，覆盖带筛选 ID 的首次加载、两组筛选均空、仅期数为空、仅类型为空、筛选失败重试、漫画失败重试、空漫画列表及后台刷新后筛选变空。旧代码已复现永久骨架屏和筛选尚未返回时提前请求漫画；修复后前端全量 66 个测试通过。测试文件使用 Router 忽略前缀，不生成额外路由。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:79](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:79)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:133](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:133)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/-weekly.test.tsx:169](E:/ppxb/jm-boom/web/src/routes/_app/explore/-weekly.test.tsx:169)。
 
 - [ ] **15 · P2 · 评论分页仅由滚动事件触发，短列表无法继续加载**
 
@@ -357,15 +359,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 11 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 14 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 118 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个端点设置相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 117 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个每周推荐相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 58 个测试通过，包含第 11 项新增的 6 个端点设置挂载回归测试 |
+| web：bun test | 66 个测试通过，包含第 14 项新增的 8 个每周推荐页面挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -381,4 +383,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 12 条已修复、1 条待确认、37 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 13 条已修复、1 条待确认、36 条待处理；原生控件补充、验证记录和优化边界不计入条数。

@@ -76,7 +76,11 @@ function WeeklyPage() {
   const selectedCategoryId =
     search.categoryId || filters.data?.defaultCategoryId || categories[0]?.id || ''
   const selectedTypeId = search.typeId || filters.data?.defaultTypeId || types[0]?.id || ''
-  const canLoadItems = selectedCategoryId.length > 0 && selectedTypeId.length > 0
+  const canLoadItems =
+    categories.length > 0 &&
+    types.length > 0 &&
+    selectedCategoryId.length > 0 &&
+    selectedTypeId.length > 0
 
   const items = useQuery({
     queryKey: queryKeys.weekItems(selectedCategoryId, selectedTypeId),
@@ -126,6 +130,8 @@ function WeeklyPage() {
             </Button>
           }
         />
+      ) : filters.isSuccess && !canLoadItems ? (
+        <EmptyState emoji="(･o･;)" title="暂无每周推荐" />
       ) : (
         <>
           <div className="flex items-center justify-end gap-2">
@@ -154,7 +160,9 @@ function WeeklyPage() {
             )}
           </div>
 
-          {items.isError ? (
+          {filters.isPending || items.isLoading ? (
+            <ComicGridSkeleton />
+          ) : items.isError ? (
             <EmptyState
               emoji="Ò︵Ó"
               title="数据加载失败"
@@ -164,8 +172,6 @@ function WeeklyPage() {
                 </Button>
               }
             />
-          ) : !canLoadItems || items.isLoading ? (
-            <ComicGridSkeleton />
           ) : items.data == null || items.data.items.length === 0 ? (
             <EmptyState emoji="(･o･;)" title="暂无每周推荐" />
           ) : (
