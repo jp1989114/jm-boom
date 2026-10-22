@@ -158,9 +158,45 @@ impl ImageCache {
     pub async fn get_reader_page(&self, key: &str) -> Result<Option<CachedReaderPage>> {
         for format in PageImageFormat::supported() {
             if let Some(data) = self.get_with_extension(key, format.extension()).await? {
-                return Ok(Some(CachedReaderPage { data, format }));
+                if format.is_complete(&data) {
+                    return Ok(Some(CachedReaderPage { data, format }));
+                }
+                drop(data);
+                if let Some(page) = self.recheck_reader_page(key, format).await? {
+                    return Ok(Some(page));
+                }
             }
         }
+        Ok(None)
+    }
+
+    async fn recheck_reader_page(
+        &self,
+        key: &str,
+        format: PageImageFormat,
+    ) -> Result<Option<CachedReaderPage>> {
+        // A writer may have replaced the bad file since the initial read.
+        let _operation = self.operation_lock.write().await;
+        let cache_key = cache_index_key(key, format.extension());
+        let path = self.storage.path_for(key, format.extension());
+        if let Some(data) = self.storage.read(&path).await? {
+            if format.is_complete(&data) {
+                self.record_access(&cache_key).await;
+                return Ok(Some(CachedReaderPage { data, format }));
+            }
+            tracing::warn!(
+                cache_key,
+                path = %path.display(),
+                bytes = data.len(),
+                "清理不完整或格式不匹配的阅读缓存"
+            );
+        }
+
+        let previous_size = self.repository.entry_size(&cache_key).await?.max(0);
+        self.storage.remove_file(&path).await?;
+        self.repository.delete(&cache_key).await?;
+        self.pending_accesses.lock().await.remove(&cache_key);
+        self.adjust_current_size(-previous_size);
         Ok(None)
     }
 
@@ -207,6 +243,10 @@ impl ImageCache {
         format: PageImageFormat,
         data: &[u8],
     ) -> Result<()> {
+        anyhow::ensure!(
+            format.is_complete(data),
+            "拒绝缓存不完整或格式不匹配的阅读图片"
+        );
         self.put_with_extension(key, format.extension(), data).await
     }
 

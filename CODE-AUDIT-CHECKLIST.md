@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14、16 项已修复，第 13 项待确认，其余 35 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14、16、17 项已修复，第 13 项待确认，其余 34 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -134,11 +134,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:31](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:31)；[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:76](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.ts:76)；[E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-download.ts:34](E:/ppxb/jm-boom/web/src/features/comic-detail/use-comic-download.ts:34)；[E:/ppxb/jm-boom/web/src/lib/api/download.ts:55](E:/ppxb/jm-boom/web/src/lib/api/download.ts:55)；[E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.test.tsx:182](E:/ppxb/jm-boom/web/src/features/downloads/use-download-tasks.test.tsx:182)。
 
-- [ ] **17 · P2 · 无需解扰的损坏图片可能被持久缓存，重试仍返回同一坏数据**
+- [x] **17 · P2 · 无需解扰的损坏图片可能被持久缓存，重试仍返回同一坏数据（已修复）**
 
-  `prepare_page_image` 对直通格式只识别文件头就返回，阅读缓存读写没有使用下载存储已有的完整性校验。上游若以成功响应返回截断图片，浏览器重试参数不会改变服务端缓存键。应在共享写入路径进行轻量完整性检查或使坏缓存可失效，保持原样缓存且不额外完整解码。
+  已修复：共享阅读缓存读写复用 `PageImageFormat::is_complete`，写入前拒绝明显截断或格式不匹配的图片；读取时按需清理坏文件、SQLite 索引、待刷新的访问记录和容量统计，再由现有页面物化流程重新获取。清理前获取现有缓存写锁并重新读取，保留已被并发替换的完整图片。检查范围是格式标识、JPEG/PNG/GIF 结束标记及 WebP 声明长度，保持原样缓存，不新增完整解码，也不修改缓存版本或清空完整缓存。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/reader/page.rs:85](E:/ppxb/jm-boom/server/src/reader/page.rs:85)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:173](E:/ppxb/jm-boom/server/src/cache/mod.rs:173)；[E:/ppxb/jm-boom/server/src/download/storage.rs:32](E:/ppxb/jm-boom/server/src/download/storage.rs:32)；[E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:282](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:282)。
+  验证：新增 9 个回归测试，覆盖四种格式的字节保真、拒绝截断及格式错误的写入、旧坏缓存清理、有效替代格式、拒绝坏图覆盖完整缓存、并发清理计数、保留并发替换的完整文件，以及截断响应后重试和阅读/下载并发重取。旧实现先复现 5 个缓存缺陷；修复后后端全量 87 个测试、格式检查和 Clippy 通过。共享物化测试使用零解码额度验证直通图片不进入解码流程，并确认 8 个并发读者和下载 job 只触发一次重取。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/cache/mod.rs:158](E:/ppxb/jm-boom/server/src/cache/mod.rs:158)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:173](E:/ppxb/jm-boom/server/src/cache/mod.rs:173)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:247](E:/ppxb/jm-boom/server/src/cache/mod.rs:247)；[E:/ppxb/jm-boom/server/src/cache/tests.rs:157](E:/ppxb/jm-boom/server/src/cache/tests.rs:157)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:523](E:/ppxb/jm-boom/server/src/page_materializer.rs:523)。
 
 - [ ] **18 · P2 · 登录后的跳转校验允许反斜杠形式的外站跳转**
 
@@ -361,16 +363,16 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 16 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 17 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。前端未改动，以下前端结果沿用第 16 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 114 个现有 CRLF 源码文件仍被报告。本次修改和新增的 5 个下载查询相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 第 16 项验证时未通过：其余 114 个现有 CRLF 源码文件被报告；该项修改和新增的 5 个下载查询相关源码/测试文件单独检查通过。本次未修改前端文件。 |
 | web：bun run build | 通过 |
 | web：bun test | 76 个测试通过，包含第 16 项新增的 10 个下载缓存同步回归测试 |
-| server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
+| server：cargo test --locked | 87 个测试通过，包含第 17 项新增的 9 个阅读图片缓存回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
 | 根目录：git diff --check | 通过 |
@@ -385,4 +387,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 14 条已修复、1 条待确认、35 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 15 条已修复、1 条待确认、34 条待处理；原生控件补充、验证记录和优化边界不计入条数。

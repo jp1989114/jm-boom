@@ -348,7 +348,7 @@ mod tests {
         PageSourceFuture,
     };
     use crate::{
-        cache::ImageCache,
+        cache::{reader_page_cache_key, ImageCache},
         domain::reader::ChapterManifest,
         image_work::{ImageWorkBudget, ImageWorkPriority},
         jm::JmError,
@@ -375,6 +375,7 @@ mod tests {
 
     struct TestPageSource {
         data: Vec<u8>,
+        truncate_first_download: bool,
         delay: Duration,
         remaining_failures: AtomicUsize,
         download_count: AtomicUsize,
@@ -393,6 +394,7 @@ mod tests {
         fn new(data: Vec<u8>, delay: Duration, failures: usize) -> Self {
             Self {
                 data,
+                truncate_first_download: false,
                 delay,
                 remaining_failures: AtomicUsize::new(failures),
                 download_count: AtomicUsize::new(0),
@@ -446,7 +448,7 @@ mod tests {
             _image_path: &'a str,
         ) -> PageSourceFuture<'a, Vec<u8>> {
             Box::pin(async move {
-                self.download_count.fetch_add(1, Ordering::SeqCst);
+                let attempt = self.download_count.fetch_add(1, Ordering::SeqCst);
                 let active = self.active_downloads.fetch_add(1, Ordering::SeqCst) + 1;
                 self.max_active_downloads
                     .fetch_max(active, Ordering::SeqCst);
@@ -469,7 +471,11 @@ mod tests {
                 if should_fail {
                     return Err(JmError::Network("test failure".into()));
                 }
-                Ok(self.data.clone())
+                let mut data = self.data.clone();
+                if self.truncate_first_download && attempt == 0 {
+                    data.pop();
+                }
+                Ok(data)
             })
         }
     }
@@ -510,6 +516,94 @@ mod tests {
             .iter()
             .any(|path| path.to_string_lossy().contains(".tmp-")));
 
+        cleanup(materializer, cache, root).await;
+    }
+
+    #[tokio::test]
+    async fn retries_a_truncated_passthrough_image_without_caching_it() {
+        let data = png_data();
+        let mut source = TestPageSource::new(data.clone(), Duration::ZERO, 0);
+        source.truncate_first_download = true;
+        let source = Arc::new(source);
+        let (materializer, cache, root) = test_materializer_with_budget(
+            "truncated-retry",
+            source.clone(),
+            ImageWorkBudget::new_for_test(1, 0),
+        )
+        .await;
+
+        let first = timeout(
+            Duration::from_secs(1),
+            materializer.materialize(test_request("chapter-truncated", 0, "001.png")),
+        )
+        .await
+        .expect("passthrough validation must not need a decode permit");
+        assert!(matches!(first, Err(PageMaterializeError::Internal(_))));
+        assert_eq!(cache.stats().await.unwrap().entry_count, 0);
+        assert!(cache_files(&root.join("cache")).is_empty());
+        assert!(materializer
+            .cached_page("chapter-truncated", 0)
+            .await
+            .unwrap()
+            .is_none());
+
+        let page = timeout(
+            Duration::from_secs(1),
+            materializer.materialize(test_request("chapter-truncated", 0, "001.png")),
+        )
+        .await
+        .expect("failed validation must release the network permit")
+        .expect("retry should obtain a complete image");
+        assert_eq!(page.format, PageImageFormat::Png);
+        assert_eq!(page.data, data);
+        assert_eq!(source.download_count(), 2);
+        assert_eq!(cache.stats().await.unwrap().entry_count, 1);
+        assert_eq!(cache.stats().await.unwrap().size_bytes, data.len() as i64);
+        cleanup(materializer, cache, root).await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_readers_and_downloads_replace_a_corrupt_cached_page_once() {
+        let data = png_data();
+        let source = Arc::new(TestPageSource::new(
+            data.clone(),
+            Duration::from_millis(50),
+            0,
+        ));
+        let (materializer, cache, root) = test_materializer("corrupt-cache", source.clone()).await;
+        cache
+            .put_reader_page(
+                &reader_page_cache_key("chapter-corrupt-cache", 0),
+                PageImageFormat::Png,
+                &data,
+            )
+            .await
+            .unwrap();
+        let files = cache_files(&root.join("cache"));
+        assert_eq!(files.len(), 1);
+        fs::write(&files[0], &data[..data.len() - 1]).await.unwrap();
+        let mut jobs = JoinSet::new();
+        for index in 0..8 {
+            let materializer = materializer.clone();
+            jobs.spawn(async move {
+                let mut request = test_request("chapter-corrupt-cache", 0, "001.png");
+                if index % 2 == 0 {
+                    request.priority = ImageWorkPriority::Download;
+                }
+                materializer.materialize(request).await
+            });
+        }
+        while let Some(result) = jobs.join_next().await {
+            let page = result.unwrap().unwrap();
+            assert_eq!(page.format, PageImageFormat::Png);
+            assert_eq!(page.data, data);
+        }
+        assert_eq!(source.download_count(), 1);
+        let stats = cache.stats().await.unwrap();
+        assert_eq!(stats.entry_count, 1);
+        assert_eq!(stats.size_bytes, data.len() as i64);
+        assert_eq!(fs::read(&files[0]).await.unwrap(), data);
+        assert_eq!(cache_files(&root.join("cache")).len(), 1);
         cleanup(materializer, cache, root).await;
     }
 
