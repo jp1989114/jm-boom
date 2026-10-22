@@ -41,44 +41,52 @@ export function ApiEndpointSection({
     state?.mode === 'manual' && state.selectedEndpoint
       ? state.selectedEndpoint
       : AUTO_ENDPOINT_VALUE
-  const activeProbe = state?.endpoints.find(item => item.endpoint === state.currentEndpoint)
+  const selectedProbe = state?.endpoints.find(item => item.endpoint === value)
+  const currentEndpoint = state?.currentEndpoint
 
   return (
     <SettingsSection icon={<NetworkIcon className="size-4" />} title="网络">
       <SettingRow title="上游接口" description="可选择最快的接口，或使用自动优选">
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          <Select
-            value={value}
-            disabled={isLoading || isChanging}
-            onValueChange={next => onEndpointChange(next === AUTO_ENDPOINT_VALUE ? null : next)}
-          >
-            <SelectTrigger className="min-w-0 flex-1 sm:w-72">
-              <SelectValue>
-                {value === AUTO_ENDPOINT_VALUE ? (
-                  <span className="flex items-center gap-2">
-                    <span>自动优选</span>
-                    {state?.currentEndpoint ? (
-                      <span className="hidden text-xs text-muted-foreground sm:inline">
-                        {formatEndpoint(state.currentEndpoint)}
-                      </span>
-                    ) : null}
-                  </span>
-                ) : (
-                  <EndpointDisplay endpoint={value} probe={activeProbe} />
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent position="popper" align="end">
-              <SelectGroup>
-                <SelectItem value={AUTO_ENDPOINT_VALUE}>自动优选</SelectItem>
-                {state?.endpoints.map(option => (
-                  <SelectItem key={option.endpoint} value={option.endpoint}>
-                    <EndpointDisplay endpoint={option.endpoint} probe={option} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+        <div className="flex w-full items-start gap-2 sm:w-auto">
+          <div className="min-w-0 flex-1 space-y-2 sm:w-72">
+            <Select
+              value={value}
+              disabled={isLoading || isChanging}
+              onValueChange={next => onEndpointChange(next === AUTO_ENDPOINT_VALUE ? null : next)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {value === AUTO_ENDPOINT_VALUE ? (
+                    <span className="flex items-center gap-2">
+                      <span>自动优选</span>
+                      {currentEndpoint ? (
+                        <span className="hidden text-xs text-muted-foreground sm:inline">
+                          {formatEndpoint(currentEndpoint)}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : (
+                    <EndpointDisplay endpoint={value} probe={selectedProbe} />
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent position="popper" align="end">
+                <SelectGroup>
+                  <SelectItem value={AUTO_ENDPOINT_VALUE}>自动优选</SelectItem>
+                  {state?.endpoints.map(option => (
+                    <SelectItem key={option.endpoint} value={option.endpoint}>
+                      <EndpointDisplay endpoint={option.endpoint} probe={option} />
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {value !== AUTO_ENDPOINT_VALUE && currentEndpoint && currentEndpoint !== value ? (
+              <p role="status" className="text-xs wrap-anywhere text-muted-foreground">
+                当前使用：{formatEndpoint(currentEndpoint)}
+              </p>
+            ) : null}
+          </div>
           <Button
             type="button"
             variant="outline"

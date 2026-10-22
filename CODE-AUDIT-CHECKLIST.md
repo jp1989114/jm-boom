@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 10 项及第 12 项已修复，其余 39 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项已修复，其余 38 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -88,11 +88,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:41](E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:41)；[E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:47](E:/ppxb/jm-boom/web/src/features/settings/account-section.tsx:47)；[E:/ppxb/jm-boom/web/src/features/settings/page.tsx:79](E:/ppxb/jm-boom/web/src/features/settings/page.tsx:79)；[E:/ppxb/jm-boom/web/src/features/settings/account-section.test.tsx:230](E:/ppxb/jm-boom/web/src/features/settings/account-section.test.tsx:230)。
 
-- [ ] **11 · P2 · 手动端点显示的延迟与可用状态可能属于另一个端点**
+- [x] **11 · P2 · 手动端点显示的延迟与可用状态可能属于另一个端点（已修复）**
 
-  触发器使用 `selectedEndpoint` 作为名称，却按 `currentEndpoint` 查找 `activeProbe`。手动端点失败并切到兜底后，原端点名称会配上兜底端点的成功状态和延迟。应按被显示的 endpoint 查找对应探测结果，当前实际使用端点另行表达。
+  已修复：选择框按所选端点查找自身的探测结果，缺少结果时显示“未测试”。手动选择与实际使用端点不同时，在选择框下方独立显示“当前使用”接口，支持长地址换行；恢复一致时隐藏提示。保留手动选择、自动模式、测速操作和后端故障切换逻辑。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:39](E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:39)。
+  验证：新增 6 个实际 React 组件挂载回归测试，覆盖选中端点不可用、两个端点延迟不同、缺少探测结果、恢复选中端点、自动模式以及加载/测速操作。旧代码在其中 4 个场景失败，修复后全部通过；前端全量 58 个测试通过。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:44](E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:44)；[E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:85](E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.tsx:85)；[E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.test.tsx:88](E:/ppxb/jm-boom/web/src/features/settings/api-endpoint-section.test.tsx:88)。
 
 - [x] **12 · P2 · 下一章预加载依赖不会执行的失败 catch（已修复）**
 
@@ -353,15 +355,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 12 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
+第 11 项修复后重新执行了前端类型检查、lint、测试、构建、格式检查与 diff 检查。后端未改动，以下后端结果沿用第 4 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：其余 119 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个下一章预加载相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
+| web：bun run fmt:check | 未通过：其余 118 个现有 CRLF 源码文件仍被报告。本次修改和新增的 2 个端点设置相关源码/测试文件单独运行 oxfmt 检查通过；未批量改写无关文件。 |
 | web：bun run build | 通过 |
-| web：bun test | 52 个测试通过，包含第 12 项新增的 10 个下一章预加载挂载回归测试 |
+| web：bun test | 58 个测试通过，包含第 11 项新增的 6 个端点设置挂载回归测试 |
 | server：cargo test --locked | 78 个测试通过，含第 1 项新增的 7 个、第 2 项新增的 3 个、第 3 项新增的 3 个和第 4 项新增的 2 个回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -377,4 +379,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条问题，其中 11 条已修复、39 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
+共 50 条问题，其中 12 条已修复、38 条待处理；原生控件补充、验证记录和优化边界不计入问题条数。
