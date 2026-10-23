@@ -1,13 +1,17 @@
 use super::{cache_index_key, storage::temporary_path, CacheConfig, ImageCache};
 use crate::reader::PageImageFormat;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
+    future::{poll_fn, Future},
     io::Cursor,
     path::PathBuf,
+    pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
+    task::Poll,
+    time::{Duration, Instant},
 };
 use tokio::{fs, task::JoinSet};
 
@@ -65,6 +69,197 @@ async fn evicts_to_half_capacity_only_after_limit_is_exceeded() {
     fs::remove_dir_all(cache_dir)
         .await
         .expect("remove test cache");
+}
+
+#[tokio::test]
+async fn eviction_allows_queued_reads_before_reaching_half_capacity() {
+    let (cache, root, _) = seeded_cache("evict-reader", 257, 1, 256).await;
+    let gate = cache.operation_lock.read().await;
+    let mut eviction = Box::pin(cache.evict_if_needed());
+    assert_pending(eviction.as_mut()).await;
+    let mut read = Box::pin(cache.get_cover("old-0100"));
+    assert_pending(read.as_mut()).await;
+    drop(gate);
+
+    let (evicted, read) = tokio::join!(eviction, read);
+    assert_eq!(read.unwrap(), Some(vec![1]));
+    assert_eq!(evicted.unwrap(), 129);
+    assert_eq!(cache.get_cover("old-0100").await.unwrap(), Some(vec![1]));
+    assert_eq!(cache.stats().await.unwrap().size_bytes, 128);
+    assert_eq!(cache.current_size_bytes.load(Ordering::Relaxed), 128);
+    fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn eviction_preserves_queued_replacements_and_accounts_for_their_size() {
+    let (cache, root, _) = seeded_cache("evict-writer", 257, 1, 256).await;
+    let gate = cache.operation_lock.read().await;
+    let mut eviction = Box::pin(cache.evict_if_needed());
+    assert_pending(eviction.as_mut()).await;
+    let mut replacement = Box::pin(async {
+        cache.put_cover("old-0100", &[9; 80]).await.unwrap();
+        cache.current_size_bytes.load(Ordering::Relaxed)
+    });
+    assert_pending(replacement.as_mut()).await;
+    drop(gate);
+
+    let (evicted, size_at_write_completion) = tokio::join!(eviction, replacement);
+    assert!(size_at_write_completion > 256);
+    assert_eq!(evicted.unwrap(), 208);
+    assert_eq!(
+        cache.get_cover("old-0100").await.unwrap(),
+        Some(vec![9; 80])
+    );
+    assert_eq!(cache.stats().await.unwrap().size_bytes, 128);
+    assert_eq!(cache.current_size_bytes.load(Ordering::Relaxed), 128);
+    fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn eviction_yields_to_clear_and_preserves_subsequent_writes() {
+    let (cache, root, _) = seeded_cache("evict-clear", 257, 1, 256).await;
+    let gate = cache.operation_lock.read().await;
+    let mut eviction = Box::pin(cache.evict_if_needed());
+    assert_pending(eviction.as_mut()).await;
+    let mut clear = Box::pin(async {
+        cache.clear().await.unwrap();
+        cache.put_cover("after-clear", &[7; 4]).await.unwrap();
+    });
+    assert_pending(clear.as_mut()).await;
+    drop(gate);
+
+    let (evicted, ()) = tokio::join!(eviction, clear);
+    assert!((1..=64).contains(&evicted.unwrap()));
+    assert_eq!(
+        cache.get_cover("after-clear").await.unwrap(),
+        Some(vec![7; 4])
+    );
+    let stats = cache.stats().await.unwrap();
+    assert_eq!(stats.size_bytes, 4);
+    assert_eq!(stats.entry_count, 1);
+    assert_eq!(cache.current_size_bytes.load(Ordering::Relaxed), 4);
+    fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn eviction_keeps_accounting_for_deletions_before_a_file_error() {
+    let (cache, root, _) = seeded_cache("evict-file-error", 5, 4, 10).await;
+    let invalid_path = cache.storage.path_for("old-0001", "img");
+    fs::remove_file(&invalid_path).await.unwrap();
+    fs::create_dir(&invalid_path).await.unwrap();
+
+    assert!(cache.evict_if_needed().await.is_err());
+    assert_eq!(
+        cache.repository.entry_size("old-0000:img").await.unwrap(),
+        0
+    );
+    assert_eq!(cache.stats().await.unwrap().size_bytes, 16);
+    assert_eq!(cache.current_size_bytes.load(Ordering::Relaxed), 16);
+
+    fs::remove_dir(&invalid_path).await.unwrap();
+    fs::write(&invalid_path, [1; 4]).await.unwrap();
+    assert_eq!(cache.evict_if_needed().await.unwrap(), 3);
+    assert_eq!(cache.stats().await.unwrap().size_bytes, 4);
+    assert_eq!(cache.current_size_bytes.load(Ordering::Relaxed), 4);
+    fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn eviction_recovers_after_an_index_batch_fails() {
+    let (cache, root, db) = seeded_cache("evict-sql-error", 5, 4, 10).await;
+    sqlx::query(
+        "CREATE TRIGGER fail_eviction BEFORE DELETE ON cache_index \
+         WHEN OLD.key = 'old-0001:img' BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    assert!(cache.evict_if_needed().await.is_err());
+    assert!(!cache.storage.path_for("old-0001", "img").exists());
+    assert_eq!(
+        cache.repository.entry_size("old-0001:img").await.unwrap(),
+        4
+    );
+    assert_eq!(
+        cache.current_size_bytes.load(Ordering::Relaxed),
+        cache.stats().await.unwrap().size_bytes
+    );
+
+    sqlx::query("DROP TRIGGER fail_eviction")
+        .execute(&db)
+        .await
+        .unwrap();
+    cache.evict_if_needed().await.unwrap();
+    let stats = cache.stats().await.unwrap();
+    assert_eq!(stats.size_bytes, 4);
+    assert_eq!(stats.entry_count, 1);
+    assert_eq!(cache.current_size_bytes.load(Ordering::Relaxed), 4);
+    assert_eq!(cache.storage.scan_files().await.unwrap().len(), 1);
+    fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "disk-backed near-capacity eviction latency measurement"]
+async fn measures_cache_read_latency_during_near_capacity_eviction() {
+    let root = test_cache_dir("evict-latency");
+    fs::create_dir_all(&root).await.unwrap();
+    let db = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(root.join("cache.sqlite"))
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    sqlx::migrate!("./migrations").run(&db).await.unwrap();
+    let cache = ImageCache::new_with_cache_dir(
+        db.clone(),
+        CacheConfig {
+            max_size_bytes: 64 * 1024 * 1024,
+        },
+        root.join("images"),
+    )
+    .await
+    .unwrap();
+    seed_entries(&cache, &db, 4097, 16 * 1024).await;
+    let gate = cache.operation_lock.read().await;
+    let done = AtomicBool::new(false);
+    let mut eviction = Box::pin(async {
+        let started = Instant::now();
+        let count = cache.evict_if_needed().await.unwrap();
+        done.store(true, Ordering::Relaxed);
+        (count, started.elapsed())
+    });
+    assert_pending(eviction.as_mut()).await;
+    let mut reads = Box::pin(async {
+        let mut waits = Vec::new();
+        while !done.load(Ordering::Relaxed) || waits.is_empty() {
+            let started = Instant::now();
+            assert!(cache.get_cover("old-4000").await.unwrap().is_some());
+            waits.push(started.elapsed().as_secs_f64() * 1000.0);
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        waits
+    });
+    assert_pending(reads.as_mut()).await;
+    drop(gate);
+    let ((evicted, elapsed), mut waits) = tokio::join!(eviction, reads);
+    let first = waits[0];
+    waits.sort_by(f64::total_cmp);
+    eprintln!(
+        "64 MiB cache, 4097 x 16 KiB files: evicted={evicted}, total_ms={:.2}, reads={}, first_ms={first:.2}, p95_ms={:.2}, max_ms={:.2}",
+        elapsed.as_secs_f64() * 1000.0,
+        waits.len(),
+        waits[(waits.len() - 1) * 95 / 100],
+        waits.last().unwrap(),
+    );
+    assert_eq!(evicted, 2049);
+    assert_eq!(cache.stats().await.unwrap().size_bytes, 32 * 1024 * 1024);
+    drop(cache);
+    db.close().await;
+    fs::remove_dir_all(root).await.unwrap();
 }
 
 #[tokio::test]
@@ -375,6 +570,55 @@ async fn test_cache(name: &str, max_size_bytes: i64) -> (ImageCache, PathBuf) {
     .await
     .expect("create test cache");
     (cache, cache_dir)
+}
+
+async fn assert_pending<F: Future>(mut future: Pin<&mut F>) {
+    poll_fn(|cx| {
+        assert!(future.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+}
+
+async fn seeded_cache(
+    name: &str,
+    count: usize,
+    entry_size: usize,
+    max_size_bytes: i64,
+) -> (ImageCache, PathBuf, sqlx::SqlitePool) {
+    let db = test_db().await;
+    let root = test_cache_dir(name);
+    let cache =
+        ImageCache::new_with_cache_dir(db.clone(), CacheConfig { max_size_bytes }, root.clone())
+            .await
+            .unwrap();
+    seed_entries(&cache, &db, count, entry_size).await;
+    (cache, root, db)
+}
+
+async fn seed_entries(cache: &ImageCache, db: &sqlx::SqlitePool, count: usize, entry_size: usize) {
+    let data = vec![1; entry_size];
+    let mut transaction = db.begin().await.unwrap();
+    for index in 0..count {
+        let key = format!("old-{index:04}");
+        let path = cache.storage.path_for(&key, "img");
+        fs::write(&path, &data).await.unwrap();
+        sqlx::query(
+            "INSERT INTO cache_index (key, path, size, created_at, accessed_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(cache_index_key(&key, "img"))
+        .bind(path.to_string_lossy().as_ref())
+        .bind(entry_size as i64)
+        .bind(index as i64)
+        .bind(index as i64)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    }
+    transaction.commit().await.unwrap();
+    cache
+        .current_size_bytes
+        .store((count * entry_size) as i64, Ordering::Relaxed);
 }
 
 async fn test_db() -> sqlx::SqlitePool {

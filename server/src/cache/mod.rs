@@ -72,6 +72,7 @@ pub struct ImageCache {
     max_size_bytes: i64,
     current_size_bytes: AtomicI64,
     operation_lock: RwLock<()>,
+    eviction_lock: Mutex<()>,
     pending_accesses: Mutex<HashMap<String, i64>>,
 }
 
@@ -105,6 +106,7 @@ impl ImageCache {
             max_size_bytes: config.max_size_bytes,
             current_size_bytes: AtomicI64::new(0),
             operation_lock: RwLock::new(()),
+            eviction_lock: Mutex::new(()),
             pending_accesses: Mutex::new(HashMap::new()),
         };
 

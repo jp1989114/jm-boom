@@ -119,15 +119,32 @@ impl CacheRepository {
         )
     }
 
-    pub(super) async fn eviction_candidates(&self) -> Result<Vec<CacheEntry>> {
+    pub(super) async fn eviction_candidates(&self, limit: i64) -> Result<Vec<CacheEntry>> {
         Ok(sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT key, path, size FROM cache_index ORDER BY accessed_at ASC, created_at ASC",
+            "SELECT key, path, size FROM cache_index ORDER BY accessed_at ASC, created_at ASC LIMIT ?",
         )
+        .bind(limit)
         .fetch_all(&self.db)
         .await?
         .into_iter()
         .map(|(key, path, size)| CacheEntry { key, path, size })
         .collect())
+    }
+
+    pub(super) async fn delete_many(&self, keys: &[String]) -> Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let mut transaction = self.db.begin().await?;
+        let mut query = sqlx::QueryBuilder::new("DELETE FROM cache_index WHERE key IN (");
+        let mut separated = query.separated(", ");
+        for key in keys {
+            separated.push_bind(key);
+        }
+        separated.push_unseparated(")");
+        query.build().execute(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub(super) async fn delete(&self, key: &str) -> Result<()> {

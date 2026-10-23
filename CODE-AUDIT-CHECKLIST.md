@@ -1,10 +1,10 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项及第 22 至 23 项已修复，第 13 项待确认，其余 31 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项及第 26 项已修复，第 13 项待确认，其余 30 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
-本次以静态审查为主，运行了项目验证基线并对三个行为做了最小复现。没有执行浏览器视觉验收或并发压力测试，因此性能项描述的是代码中的成本来源及触发条件，不代表已经测得线上延迟。shadcn 允许通过 className 定制；合理布局扩展、原生语义标签和保护并发/文件完整性的检查不自动构成问题。
+本次以静态审查为主，运行了项目验证基线并对三个行为做了最小复现，第 26 项另补充了本地近容量缓存的读取延迟对比。没有执行浏览器视觉验收或生产环境并发压力测试；除明确给出的本地测量外，性能项描述的是代码中的成本来源及触发条件，不代表已经测得线上延迟。shadcn 允许通过 className 定制；合理布局扩展、原生语义标签和保护并发/文件完整性的检查不自动构成问题。
 
 ## 行为、状态一致性与错误处理
 
@@ -198,11 +198,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/server/src/api/reader.rs:166](E:/ppxb/jm-boom/server/src/api/reader.rs:166)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:116](E:/ppxb/jm-boom/server/src/page_materializer.rs:116)。
 
-- [ ] **26 · P2 · 缓存淘汰在全局写锁内逐条删文件和提交 SQL**
+- [x] **26 · P2 · 缓存淘汰在全局写锁内逐条删文件和提交 SQL（已修复）**
 
-  容量越界时，LRU 淘汰一直持有 `operation_lock.write()`，逐条执行文件删除及独立 SQL，直到容量降到一半；期间所有缓存读写均等待。默认容量 5 GiB，集中淘汰时可能形成明显停顿。应批量提交索引删除并控制单次工作量，再用接近容量上限的缓存验证阻塞时间。
+  已修复：保留超限后清到一半的策略，每批最多选取 64 个 LRU 条目，并在每次文件删除后检查 10 ms 时间预算；每批索引删除使用一个事务内的批量 SQL，随后释放全局写锁让正常读写执行。单独的淘汰互斥锁避免并发写入重复启动或等待整轮淘汰；下一批重新检查容量、刷新访问记录并选择候选，保护期间的读取、替换和清空操作。文件删除中途失败时先提交已成功删除部分并更新容量；SQL 失败保留索引计数，后续淘汰可处理已经缺失的文件。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/cache/maintenance.rs:68](E:/ppxb/jm-boom/server/src/cache/maintenance.rs:68)；[E:/ppxb/jm-boom/server/src/cache/maintenance.rs:92](E:/ppxb/jm-boom/server/src/cache/maintenance.rs:92)；[E:/ppxb/jm-boom/server/src/cache/repository.rs:133](E:/ppxb/jm-boom/server/src/cache/repository.rs:133)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:238](E:/ppxb/jm-boom/server/src/cache/mod.rs:238)。
+  验证：新增 5 个回归测试，覆盖批间读取、替换及容量变化、清空后写入、文件删除失败和 SQL 失败恢复。读取阻塞与中途失败后容量失真的两个测试在旧代码上失败，修复后通过；后端全量 105 个常规测试通过。
+
+  本地测量：Windows debug 构建、磁盘 SQLite、64 MiB 容量、4,097 个 16 KiB 文件，触发淘汰 2,049 个文件。修复前后首个排队读取耗时由 7,841.21 ms 降为 15.42 ms，整轮淘汰由 7,840.88 ms 降为 1,563.33 ms；修复后淘汰期间完成 111 次读取，P95 为 13.96 ms，最大 18.43 ms。该单次本机对比不代表默认 5 GiB 缓存的生产延迟，10 ms 检查也不限制单次文件或 SQL I/O 的耗时。测量测试默认忽略，可通过 `cargo test --locked measures_cache_read_latency_during_near_capacity_eviction -- --ignored --nocapture` 单独复现。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/cache/maintenance.rs:75](E:/ppxb/jm-boom/server/src/cache/maintenance.rs:75)；[E:/ppxb/jm-boom/server/src/cache/repository.rs:122](E:/ppxb/jm-boom/server/src/cache/repository.rs:122)；[E:/ppxb/jm-boom/server/src/cache/repository.rs:134](E:/ppxb/jm-boom/server/src/cache/repository.rs:134)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:75](E:/ppxb/jm-boom/server/src/cache/mod.rs:75)；[E:/ppxb/jm-boom/server/src/cache/tests.rs:75](E:/ppxb/jm-boom/server/src/cache/tests.rs:75)；[E:/ppxb/jm-boom/server/src/cache/tests.rs:204](E:/ppxb/jm-boom/server/src/cache/tests.rs:204)。
 
 - [ ] **27 · P2 · 阅读图片尺寸缓存没有容量或会话清理边界**
 
@@ -369,16 +373,17 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 23 项修复后重新执行了前后端测试、类型检查、lint、格式检查、构建、Clippy 与 diff 检查。
+第 26 项修复后重新执行了后端测试、近容量缓存测量、格式检查、Clippy 与 diff 检查。本次未改动前端，以下前端结果沿用第 23 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 未通过：修改前确认有 113 个现有 CRLF 源码文件被报告；本次修改的 src/lib/api/comic.ts 统一为 LF 并单独检查通过，其余 112 个文件保持原样。 |
+| web：bun run fmt:check | 第 23 项验证时未通过：修改前有 113 个现有 CRLF 源码文件被报告，该项修改的 src/lib/api/comic.ts 统一为 LF 并单独检查通过，其余 112 个文件保持原样。本次未修改前端文件。 |
 | web：bun run build | 通过 |
 | web：bun test | 107 个测试通过 |
-| server：cargo test --locked | 100 个测试通过，包含第 23 项新增的评论接口回归测试 |
+| server：cargo test --locked | 105 个测试通过，包含第 26 项新增的 5 个淘汰回归测试；1 个磁盘延迟测量默认忽略 |
+| server：近容量缓存延迟测量（--ignored --nocapture） | 单独运行通过；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
 | 根目录：git diff --check | 通过 |
@@ -393,4 +398,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 18 条已修复、1 条待确认、31 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 19 条已修复、1 条待确认、30 条待处理；原生控件补充、验证记录和优化边界不计入条数。
