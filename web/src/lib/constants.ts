@@ -53,11 +53,5 @@ export const HISTORY = {
 export const UI = {
   CHAPTER_PAGE_SIZE: 5,
   COLLECTION_PAGE_SIZE: 20,
-  COMMENT_SKELETON_COUNT: 6,
-  SHOW_COVER_MASK: true
-} as const
-
-// Download configuration
-export const DOWNLOAD = {
-  PROGRESS_PERSIST_INTERVAL: TIME.SECOND
+  COMMENT_SKELETON_COUNT: 6
 } as const

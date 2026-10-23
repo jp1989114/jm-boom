@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项及第 49 项已修复，第 13 项待确认，其余 27 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 26 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -330,11 +330,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/server/src/jm/client.rs:365](E:/ppxb/jm-boom/server/src/jm/client.rs:365)。
 
-- [ ] **46 · P3 · 存在已无调用的配置和门禁清理接口**
+- [x] **46 · P3 · 存在已无调用的配置和门禁清理接口（已修复）**
 
-  全仓搜索未发现 `UI.SHOW_COVER_MASK`、前端 `DOWNLOAD.PROGRESS_PERSIST_INTERVAL`、`clearAccessGateGrant` 的调用；当前封面由 hideCovers 控制，下载进度持久化在后端。这些入口会让维护者误以为修改它们能改变行为，应删除或在真实功能需要时再引入。
+  已修复：删除未使用的 `UI.SHOW_COVER_MASK`、整个前端 `DOWNLOAD` 配置和 `clearAccessGateGrant`。封面继续由 hideCovers 控制，保留门禁配置加载、授权查询与写入函数，以及服务端实际使用的下载进度持久化间隔。未新增功能或修改运行行为。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/lib/constants.ts:52](E:/ppxb/jm-boom/web/src/lib/constants.ts:52)；[E:/ppxb/jm-boom/web/src/lib/access-gate.ts:23](E:/ppxb/jm-boom/web/src/lib/access-gate.ts:23)；[E:/ppxb/jm-boom/server/src/download/state.rs:8](E:/ppxb/jm-boom/server/src/download/state.rs:8)。
+  验证：源码搜索确认前端已无这三处定义或引用，后端同名进度保存常量仍被使用。类型检查、构建、两个修改文件的 lint 和格式检查通过，现有 31 个门禁登录测试全部通过。全量前端验证仍有既有失败，详见文末。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/lib/constants.ts:53](E:/ppxb/jm-boom/web/src/lib/constants.ts:53)；[E:/ppxb/jm-boom/web/src/lib/access-gate.ts:19](E:/ppxb/jm-boom/web/src/lib/access-gate.ts:19)；[E:/ppxb/jm-boom/server/src/download/state.rs:9](E:/ppxb/jm-boom/server/src/download/state.rs:9)。
 
 - [ ] **47 · P2 · 宽松数字反序列化会把越界值截断为另一个有效 ID**
 
@@ -379,15 +381,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 49 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。本次未改动前端，以下前端结果沿用第 27 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
+第 46 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
-| web：bun run lint | 未通过：当前工具链报告 15 个既有 React 规则错误；原版 reader-image.tsx 单独检查同样触发 set-state-in-effect，其余报错均位于未修改文件。新增测试文件单独 lint 通过。 |
-| web：bun run fmt:check | 第 27 项验证时未通过：修改前有 112 个现有 CRLF 源码文件被报告，该项修改的 reader-image.tsx 统一为 LF，与新增测试文件均单独检查通过，其余 111 个文件保持原样。本次未修改前端文件。 |
+| web：bun run lint | 未通过：仍有 15 个既有 React 规则错误，均位于未修改文件。本次修改的 constants.ts 和 access-gate.ts 单独 lint 通过。 |
+| web：bun run fmt:check | 未通过：仍有 109 个现有 CRLF 源码文件被报告；本次修改的 constants.ts 和 access-gate.ts 统一为 LF，单独检查通过。 |
 | web：bun run build | 通过 |
-| web：bun test | 95 个通过、18 个失败；新增 6 个图片尺寸缓存回归测试全部通过。排除新增测试后，原有 107 个测试仍为 89 个通过、同样 18 个失败，涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
+| web：bun test | 95 个通过、18 个失败，现有 31 个门禁登录测试全部通过；18 个既有失败仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
 | server：cargo test --locked | 113 个测试通过，历史测试已补充第 49 项的迟到进度与相同时间戳边界；1 个磁盘延迟测量默认忽略 |
 | server：近容量缓存延迟测量（--ignored --nocapture） | 第 26 项单独运行通过，本次未重复测量；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
@@ -404,4 +406,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 22 条已修复、1 条待确认、27 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 23 条已修复、1 条待确认、26 条待处理；原生控件补充、验证记录和优化边界不计入条数。

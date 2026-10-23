@@ -19,7 +19,3 @@ export function hasAccessGateGrant() {
 export function grantAccessGate() {
   sessionStorage.setItem(ACCESS_GATE_KEY, 'true')
 }
-
-export function clearAccessGateGrant() {
-  sessionStorage.removeItem(ACCESS_GATE_KEY)
-}
