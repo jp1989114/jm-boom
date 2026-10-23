@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项及第 26 项已修复，第 13 项待确认，其余 30 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项及第 26 至 27 项已修复，第 13 项待确认，其余 29 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -208,11 +208,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/server/src/cache/maintenance.rs:75](E:/ppxb/jm-boom/server/src/cache/maintenance.rs:75)；[E:/ppxb/jm-boom/server/src/cache/repository.rs:122](E:/ppxb/jm-boom/server/src/cache/repository.rs:122)；[E:/ppxb/jm-boom/server/src/cache/repository.rs:134](E:/ppxb/jm-boom/server/src/cache/repository.rs:134)；[E:/ppxb/jm-boom/server/src/cache/mod.rs:75](E:/ppxb/jm-boom/server/src/cache/mod.rs:75)；[E:/ppxb/jm-boom/server/src/cache/tests.rs:75](E:/ppxb/jm-boom/server/src/cache/tests.rs:75)；[E:/ppxb/jm-boom/server/src/cache/tests.rs:204](E:/ppxb/jm-boom/server/src/cache/tests.rs:204)。
 
-- [ ] **27 · P2 · 阅读图片尺寸缓存没有容量或会话清理边界**
+- [x] **27 · P2 · 阅读图片尺寸缓存没有容量或会话清理边界（已修复）**
 
-  `loadedImageSizes` 是模块级 Map，每张看过的图片都会永久新增 URL 与尺寸记录，路由卸载不会清理。它保存的是尺寸而非图片二进制，但长时间阅读不同漫画仍会线性增长。应设置合理容量或按章节淘汰，同时保留当前章节回滚时避免布局跳动的用途。
+  已修复：尺寸 Map 最多保留 1,000 个 URL；图片成功加载或已缓存图片挂载、切换 src 后更新使用顺序，超过容量时删除最久未使用的记录。缓存顺序更新只发生在事件和 Effect 中，渲染初始化仍只读取缓存。重复加载更新同一条记录，零尺寸沿用原有过滤。淘汰不修改已挂载组件自身的尺寸状态；最近页面重新挂载时仍立即恢复比例并跳过加载占位，超出保留范围的旧页按原有加载流程重新取得尺寸。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:15](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:15)；[E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:270](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:270)。
+  验证：新增 6 个 Strict Mode 下的实际组件回归测试，覆盖回滚恢复、容量边界、无新 load 事件的再次访问、重复尺寸更新、挂载期间被淘汰和无效尺寸；旧代码在 4 个场景失败，修复后 6 个全部通过。类型检查、构建和修改文件格式检查通过，完整前端验证的既有失败见文末。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:11](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:11)；[E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:17](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:17)；[E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:221](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:221)；[E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:280](E:/ppxb/jm-boom/web/src/features/reader/reader-image.tsx:280)；[E:/ppxb/jm-boom/web/src/features/reader/reader-image.test.tsx:100](E:/ppxb/jm-boom/web/src/features/reader/reader-image.test.tsx:100)。
 
 ## 原生控件、shadcn 使用与 UI 一致性
 
@@ -373,15 +375,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 26 项修复后重新执行了后端测试、近容量缓存测量、格式检查、Clippy 与 diff 检查。本次未改动前端，以下前端结果沿用第 23 项修复后的验证记录。
+第 27 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 26 项修复后的验证记录。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
-| web：bun run lint | 通过 |
-| web：bun run fmt:check | 第 23 项验证时未通过：修改前有 113 个现有 CRLF 源码文件被报告，该项修改的 src/lib/api/comic.ts 统一为 LF 并单独检查通过，其余 112 个文件保持原样。本次未修改前端文件。 |
+| web：bun run lint | 未通过：当前工具链报告 15 个既有 React 规则错误；原版 reader-image.tsx 单独检查同样触发 set-state-in-effect，其余报错均位于未修改文件。新增测试文件单独 lint 通过。 |
+| web：bun run fmt:check | 未通过：修改前有 112 个现有 CRLF 源码文件被报告；本次修改的 reader-image.tsx 统一为 LF，与新增测试文件均单独检查通过，其余 111 个文件保持原样。 |
 | web：bun run build | 通过 |
-| web：bun test | 107 个测试通过 |
+| web：bun test | 95 个通过、18 个失败；新增 6 个图片尺寸缓存回归测试全部通过。排除新增测试后，原有 107 个测试仍为 89 个通过、同样 18 个失败，涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
 | server：cargo test --locked | 105 个测试通过，包含第 26 项新增的 5 个淘汰回归测试；1 个磁盘延迟测量默认忽略 |
 | server：近容量缓存延迟测量（--ignored --nocapture） | 单独运行通过；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
@@ -398,4 +400,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 19 条已修复、1 条待确认、30 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 20 条已修复、1 条待确认、29 条待处理；原生控件补充、验证记录和优化边界不计入条数。

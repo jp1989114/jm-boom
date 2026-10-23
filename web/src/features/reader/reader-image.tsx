@@ -8,11 +8,20 @@ import type { ReaderWindowPage } from './types'
 
 type ImageSize = { width: number; height: number }
 
-// Remembers the natural dimensions of images that have already decoded so that
-// remounting a page (e.g. scrolling back in the virtualized strip) can restore
-// its exact aspect ratio and skip the loading placeholder instead of visibly
-// re-fetching and reflowing.
+const IMAGE_SIZE_CACHE_LIMIT = 1000
+
+// Restore exact aspect ratios when virtualized pages remount, while keeping
+// dimensions from older chapters from accumulating without a bound.
 const loadedImageSizes = new Map<string, ImageSize>()
+
+function rememberImageSize(src: string, size: ImageSize) {
+  loadedImageSizes.delete(src)
+  loadedImageSizes.set(src, size)
+  if (loadedImageSizes.size > IMAGE_SIZE_CACHE_LIMIT) {
+    const oldestSrc = loadedImageSizes.keys().next().value!
+    loadedImageSizes.delete(oldestSrc)
+  }
+}
 
 export function ReaderImageWindow({
   pages,
@@ -209,6 +218,7 @@ export function ReaderPageImage({
 
   useEffect(() => {
     const cached = loadedImageSizes.get(src)
+    if (cached) rememberImageSize(src, cached)
     setStatus(cached ? 'loaded' : 'loading')
     setSize(cached ?? null)
     setAttempt(0)
@@ -267,7 +277,7 @@ export function ReaderPageImage({
           const image = event.currentTarget
           if (image.naturalWidth > 0 && image.naturalHeight > 0) {
             const nextSize = { width: image.naturalWidth, height: image.naturalHeight }
-            loadedImageSizes.set(src, nextSize)
+            rememberImageSize(src, nextSize)
             setSize(nextSize)
           }
           setStatus('loaded')
