@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 41 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 25 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 41 至 42 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 24 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -308,11 +308,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/features/home/page.tsx:13](E:/ppxb/jm-boom/web/src/features/home/page.tsx:13)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40](E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:60](E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:60)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:61](E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:61)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:83](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:83)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8](E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19](E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19)；[E:/ppxb/jm-boom/web/src/features/reader/reader-chapter-drawer.tsx:31](E:/ppxb/jm-boom/web/src/features/reader/reader-chapter-drawer.tsx:31)；[E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19](E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19)。
 
-- [ ] **42 · P3 · 阅读器会话同时依赖路由 key 重建和内部 scope 重置**
+- [x] **42 · P3 · 阅读器会话同时依赖路由 key 重建和内部 scope 重置（已修复）**
 
-  ReaderRoute 已按 comicId/page 给 ReaderPage 设置 key，useReaderSession 又维护 scope、scopeRef、带 scope 的 position 和 scope 变化 effect；当前唯一调用路径下，这套跨 scope 重置逻辑不会被需要。应统一会话重建责任，保留页码夹取和虚拟列表导航命令，不合并其他职责 hook。
+  已修复：继续由 ReaderRoute 的 comicId/起始页 key 重建整个阅读会话；useReaderSession 只保存数字页码，删除 scope、scopeRef、带 scope 的位置对象、跨 scope 重置 Effect 和位置比较辅助函数。保留页码及步长归一化、manifest 页数变化后的夹取、单/双页窗口和虚拟列表导航命令；观察滚动只更新位置，主动跳转即使目标页相同也继续递增命令 ID。路由、ReaderPage 和其他职责 hook 保持原有实现。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/routes/reader/$comicId.tsx:18](E:/ppxb/jm-boom/web/src/routes/reader/$comicId.tsx:18)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:32](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:32)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:92](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:92)；[E:/ppxb/jm-boom/web/src/features/reader/reader-page.tsx:63](E:/ppxb/jm-boom/web/src/features/reader/reader-page.tsx:63)。
+  验证：新增 8 个 Strict Mode 回归场景，以实际路由组件的 key、会话 hook 和 QueryClient 验证加载后夹取、普通翻页和双页模式保持会话、切章重建、起始页变化与等价 page=1、旧章节迟到响应、观察与主动导航的区别、页数缩减后恢复，以及失败重试。精简前后全部通过；类型检查、构建和修改文件格式检查通过。完整测试为 103 个通过、18 个既有失败，lint 的 15 个既有报错与变更前一致。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/routes/reader/$comicId.tsx:18](E:/ppxb/jm-boom/web/src/routes/reader/$comicId.tsx:18)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:29](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:29)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:45](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:45)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:77](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:77)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.test.tsx:157](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.test.tsx:157)。
 
 - [ ] **43 · P3 · 进度滑块保留了只写不读的 ref**
 
@@ -383,15 +385,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 41 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
+第 42 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 未通过：仍有 15 个既有 React 规则错误，去除行号后与变更前日志逐条一致，无新增报错。 |
-| web：bun run fmt:check | 未通过：仍有 102 个未修改文件被报告；本次 14 个源码/测试文件单独检查全部通过。 |
+| web：bun run fmt:check | 未通过：仍有 101 个未修改文件被报告；本次会话 hook 和新增测试文件单独检查全部通过。 |
 | web：bun run build | 通过 |
-| web：bun test | 95 个通过、18 个失败；失败用例与变更前逐条一致，仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
+| web：bun test | 103 个通过、18 个失败，新增 8 个阅读会话回归测试全部通过；失败用例与变更前逐条一致，仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
 | server：cargo test --locked | 113 个测试通过，历史测试已补充第 49 项的迟到进度与相同时间戳边界；1 个磁盘延迟测量默认忽略 |
 | server：近容量缓存延迟测量（--ignored --nocapture） | 第 26 项单独运行通过，本次未重复测量；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
@@ -408,4 +410,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 24 条已修复、1 条待确认、25 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 25 条已修复、1 条待确认、24 条待处理；原生控件补充、验证记录和优化边界不计入条数。

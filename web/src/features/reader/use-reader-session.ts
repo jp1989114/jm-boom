@@ -1,15 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { ComicReadManifestPage } from '@/lib/api/reader'
 import type { ReaderWindowPage } from './types'
 import { useReaderManifestQuery } from './use-reader-manifest-query'
 
 const EMPTY_MANIFEST_PAGES: ComicReadManifestPage[] = []
-
-type ReaderPosition = {
-  scope: string
-  currentIndex: number
-}
 
 export type ReaderNavigationCommand = {
   id: number
@@ -30,22 +25,17 @@ export function useReaderSession({
   const pageCount = pages.length
   const initialPageIndex = normalizePageIndex(initialIndex)
   const normalizedPageStep = normalizePageStep(pageStep)
-  const scope = `${comicId}:${initialPageIndex}`
-  const scopeRef = useRef(scope)
-  const [position, setPosition] = useState<ReaderPosition>(() => ({
-    scope,
-    currentIndex: initialPageIndex
-  }))
+  // ReaderRoute remounts this session when the chapter or starting page changes.
+  const [pageIndex, setPageIndex] = useState(initialPageIndex)
   const [navigationCommand, setNavigationCommand] = useState<ReaderNavigationCommand>(() => ({
     id: 0,
     targetIndex: initialPageIndex
   }))
-  const scopedCurrentIndex = position.scope === scope ? position.currentIndex : initialPageIndex
   const clampPageIndex = useCallback(
     (index: number) => Math.min(Math.max(index, 0), Math.max(pageCount - 1, 0)),
     [pageCount]
   )
-  const currentIndex = pageCount > 0 ? clampPageIndex(scopedCurrentIndex) : scopedCurrentIndex
+  const currentIndex = pageCount > 0 ? clampPageIndex(pageIndex) : pageIndex
   const pageSrc = pages[currentIndex]?.path ?? ''
   const pageWindow = useMemo(
     () => createReaderWindow(pages, currentIndex, normalizedPageStep),
@@ -59,10 +49,10 @@ export function useReaderSession({
       }
 
       const targetIndex = clampPageIndex(index)
-      setPosition({ scope, currentIndex: targetIndex })
+      setPageIndex(targetIndex)
       setNavigationCommand(current => ({ id: current.id + 1, targetIndex }))
     },
-    [clampPageIndex, pageCount, scope]
+    [clampPageIndex, pageCount]
   )
   const goToPreviousPage = useCallback(
     () => requestNavigation(currentIndex - normalizedPageStep),
@@ -79,40 +69,18 @@ export function useReaderSession({
         return
       }
 
-      const nextIndex = clampPageIndex(index)
-      setPosition(current => {
-        const nextPosition = { scope, currentIndex: nextIndex }
-
-        return isSamePosition(current, nextPosition) ? current : nextPosition
-      })
+      setPageIndex(clampPageIndex(index))
     },
-    [clampPageIndex, pageCount, scope]
+    [clampPageIndex, pageCount]
   )
 
   useEffect(() => {
-    if (scopeRef.current === scope) {
+    if (pageIndex < pageCount || pageCount <= 0) {
       return
     }
 
-    scopeRef.current = scope
-    setPosition(current => {
-      const nextPosition = { scope, currentIndex: initialPageIndex }
-
-      return isSamePosition(current, nextPosition) ? current : nextPosition
-    })
-    setNavigationCommand(current => ({
-      id: current.id + 1,
-      targetIndex: initialPageIndex
-    }))
-  }, [initialPageIndex, scope])
-
-  useEffect(() => {
-    if (scopedCurrentIndex < pageCount || pageCount <= 0) {
-      return
-    }
-
-    setPosition({ scope, currentIndex: Math.max(0, pageCount - 1) })
-  }, [pageCount, scope, scopedCurrentIndex])
+    setPageIndex(Math.max(0, pageCount - 1))
+  }, [pageCount, pageIndex])
 
   return {
     currentIndex,
@@ -171,8 +139,4 @@ function normalizePageStep(pageStep: number) {
   }
 
   return Math.max(1, Math.floor(pageStep))
-}
-
-function isSamePosition(left: ReaderPosition, right: ReaderPosition) {
-  return left.scope === right.scope && left.currentIndex === right.currentIndex
 }

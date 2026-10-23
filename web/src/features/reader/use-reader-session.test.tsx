@@ -1,0 +1,283 @@
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from 'bun:test'
+import {
+  defaultScheduler,
+  notifyManager,
+  QueryClient,
+  QueryClientProvider
+} from '@tanstack/react-query'
+import { Window } from 'happy-dom'
+import { act, StrictMode, useLayoutEffect } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+
+import type { ComicReadManifestResult } from '@/lib/api/reader'
+import { queryKeys } from '@/lib/query-keys'
+import { Route } from '@/routes/reader/$comicId'
+import * as readerPage from './reader-page'
+import type { ReaderSearch } from './types'
+import { useReaderSession } from './use-reader-session'
+
+const ReaderRoute = Route.options.component!
+type Session = ReturnType<typeof useReaderSession>
+type Request = { path: string; resolve: (response: Response) => void }
+
+let dom: Window
+let root: Root
+let queryClient: QueryClient
+let globals: Map<string, PropertyDescriptor | undefined>
+let comicId: string
+let search: ReaderSearch
+let pageStep: number
+let session: Session
+let requests: Request[]
+
+function SessionProbe(props: Parameters<typeof readerPage.ReaderPage>[0]) {
+  const current = useReaderSession({
+    comicId: props.comicId,
+    initialIndex: props.search.page ? props.search.page - 1 : 0,
+    pageStep
+  })
+  useLayoutEffect(() => {
+    session = current
+  })
+  return <output>{current.currentIndex}</output>
+}
+
+beforeEach(() => {
+  dom = new Window({ url: 'http://localhost/reader/101' })
+  const values = {
+    window: dom,
+    document: dom.document,
+    navigator: dom.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true
+  }
+  globals = new Map(
+    Object.keys(values).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
+  )
+  for (const [key, value] of Object.entries(values)) {
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
+  }
+  const container = document.createElement('div')
+  document.body.append(container)
+  root = createRoot(container)
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        gcTime: Infinity,
+        retry: false,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false
+      }
+    }
+  })
+  notifyManager.setScheduler(queueMicrotask)
+  notifyManager.setNotifyFunction(callback => {
+    void act(callback)
+  })
+  comicId = '101'
+  search = { albumId: '100' }
+  pageStep = 1
+  requests = []
+  spyOn(Route, 'useParams').mockReturnValue({ comicId })
+  spyOn(Route, 'useSearch').mockReturnValue(search)
+  // Keep the real route key and session hook, avoiding unrelated reader UI and side effects.
+  spyOn(readerPage, 'ReaderPage').mockImplementation(SessionProbe)
+  const mockFetch = Object.assign(
+    (input: Parameters<typeof fetch>[0]) =>
+      new Promise<Response>(resolve => requests.push({ path: String(input), resolve })),
+    { preconnect: fetch.preconnect }
+  )
+  spyOn(globalThis, 'fetch').mockImplementation(mockFetch)
+})
+
+afterEach(async () => {
+  await act(async () => {
+    root.unmount()
+    for (const request of requests) request.resolve(unavailable())
+  })
+  queryClient.clear()
+  await dom.happyDOM.close()
+  notifyManager.setNotifyFunction(callback => callback())
+  notifyManager.setScheduler(defaultScheduler)
+  jest.restoreAllMocks()
+  for (const [key, descriptor] of globals) {
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+    else Reflect.deleteProperty(globalThis, key)
+  }
+})
+
+async function render(nextComicId = comicId, nextSearch = search, nextPageStep = pageStep) {
+  comicId = nextComicId
+  search = nextSearch
+  pageStep = nextPageStep
+  spyOn(Route, 'useParams').mockReturnValue({ comicId })
+  spyOn(Route, 'useSearch').mockReturnValue(search)
+  await act(async () => {
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <StrictMode>
+          <ReaderRoute />
+        </StrictMode>
+      </QueryClientProvider>
+    )
+  })
+}
+
+function manifest(readId: string, pageCount: number): ComicReadManifestResult {
+  return {
+    readId,
+    pageCount,
+    pages: Array.from({ length: pageCount }, (_, index) => ({
+      index,
+      name: `${index}.webp`,
+      path: `/api/reader/${readId}/pages/${index}`
+    }))
+  }
+}
+
+function seed(readId: string, pageCount: number) {
+  queryClient.setQueryData(queryKeys.readerManifest(readId), manifest(readId, pageCount))
+}
+
+async function respond(request: Request, readId: string, pageCount: number) {
+  const data = manifest(readId, pageCount)
+  await act(async () => {
+    request.resolve(
+      Response.json({
+        chapter_id: readId,
+        pages: data.pages.map(page => ({ index: page.index, name: page.name, url: page.path }))
+      })
+    )
+  })
+}
+
+function unavailable() {
+  return Response.json({ error: 'Unavailable', retryable: true }, { status: 503 })
+}
+
+describe('reader route session lifecycle', () => {
+  test('preserves the requested page while loading and clamps it when the manifest arrives', async () => {
+    await render('101', { albumId: '100', page: 50 })
+    expect(session.currentIndex).toBe(49)
+    expect(session.pageCount).toBe(0)
+    expect(session.pageWindow).toEqual([])
+    expect(session.isManifestLoading).toBe(true)
+    await act(async () => {
+      session.goToNextPage()
+      session.observePage(3)
+    })
+    expect(session.currentIndex).toBe(49)
+    expect(session.navigationCommand).toEqual({ id: 0, targetIndex: 49 })
+    await respond(requests[0], '101', 20)
+    expect(session.currentIndex).toBe(19)
+    expect(session.pageSrc).toBe('/api/reader/101/pages/19')
+    expect(session.isLastPage).toBe(true)
+    expect(session.isManifestLoading).toBe(false)
+  })
+
+  test('ordinary page turns and double-page mode changes keep the same mounted session', async () => {
+    seed('101', 10)
+    await render('101', { albumId: '100', page: 4 })
+    const element = document.querySelector('output')
+    expect(session.currentIndex).toBe(3)
+    await act(async () => session.goToNextPage())
+    expect(session.currentIndex).toBe(4)
+    await render('101', search, 2)
+    expect(document.querySelector('output')).toBe(element)
+    expect(session.currentIndex).toBe(4)
+    expect(session.pageWindow.map(page => page.index)).toEqual([2, 3, 4, 5, 6, 7])
+    await act(async () => session.goToNextPage())
+    expect(session.currentIndex).toBe(6)
+    await act(async () => session.goToPreviousPage())
+    expect(session.currentIndex).toBe(4)
+    expect(session.navigationCommand.id).toBe(3)
+    expect(requests).toHaveLength(0)
+  })
+
+  test('changing chapters remounts the session at page one with a new navigation sequence', async () => {
+    seed('101', 10)
+    seed('201', 8)
+    await render()
+    const element = document.querySelector('output')
+    await act(async () => session.goToPage(7))
+    expect(session.navigationCommand.id).toBe(1)
+    await render('201', { albumId: '100', page: 1 })
+    expect(document.querySelector('output')).not.toBe(element)
+    expect(session.currentIndex).toBe(0)
+    expect(session.pageSrc).toBe('/api/reader/201/pages/0')
+    expect(session.navigationCommand).toEqual({ id: 0, targetIndex: 0 })
+    await render('101', { albumId: '100', page: 1 })
+    expect(session.currentIndex).toBe(0)
+    expect(requests).toHaveLength(0)
+  })
+
+  test('changing the route starting page remounts, while equivalent page-one searches do not', async () => {
+    seed('101', 20)
+    await render()
+    const first = document.querySelector('output')
+    await act(async () => session.goToPage(5))
+    await render('101', { albumId: '100', page: 1 })
+    expect(document.querySelector('output')).toBe(first)
+    expect(session.currentIndex).toBe(5)
+    await render('101', { albumId: '100', page: 8 })
+    expect(document.querySelector('output')).not.toBe(first)
+    expect(session.currentIndex).toBe(7)
+    expect(session.navigationCommand).toEqual({ id: 0, targetIndex: 7 })
+  })
+
+  test('a late response from the previous chapter cannot reset the new session', async () => {
+    await render('101', { albumId: '100', page: 6 })
+    const previous = requests[0]
+    await render('201', { albumId: '100', page: 1 })
+    expect(requests).toHaveLength(2)
+    await respond(requests[1], '201', 4)
+    await act(async () => session.goToPage(2))
+    await respond(previous, '101', 20)
+    expect(session.currentIndex).toBe(2)
+    expect(session.pageCount).toBe(4)
+    expect(session.pageSrc).toBe('/api/reader/201/pages/2')
+    expect(session.navigationCommand).toEqual({ id: 1, targetIndex: 2 })
+  })
+
+  test('scroll observations do not issue commands, while repeated jumps still do', async () => {
+    seed('101', 20)
+    await render()
+    const initialCommand = session.navigationCommand
+    await act(async () => session.observePage(5))
+    await act(async () => session.observePage(5))
+    expect(session.currentIndex).toBe(5)
+    expect(session.navigationCommand).toBe(initialCommand)
+    await act(async () => session.goToPage(5))
+    expect(session.navigationCommand).toEqual({ id: 1, targetIndex: 5 })
+    await act(async () => session.goToPage(5))
+    expect(session.navigationCommand).toEqual({ id: 2, targetIndex: 5 })
+    await act(async () => session.goToPage(999))
+    expect(session.currentIndex).toBe(19)
+    await act(async () => session.goToPage(-1))
+    expect(session.currentIndex).toBe(0)
+  })
+
+  test('a smaller manifest clamps stored progress without restoring it when pages are added', async () => {
+    seed('101', 12)
+    await render('101', { albumId: '100', page: 12 })
+    expect(session.currentIndex).toBe(11)
+    await act(async () => seed('101', 4))
+    expect(session.currentIndex).toBe(3)
+    await act(async () => seed('101', 12))
+    expect(session.currentIndex).toBe(3)
+    expect(session.pageSrc).toBe('/api/reader/101/pages/3')
+    expect(session.navigationCommand).toEqual({ id: 0, targetIndex: 11 })
+  })
+
+  test('manifest errors and retry preserve the requested starting page', async () => {
+    await render('101', { albumId: '100', page: 4 })
+    await act(async () => requests[0].resolve(unavailable()))
+    expect(session.manifestError).not.toBeNull()
+    expect(session.currentIndex).toBe(3)
+    await act(async () => session.retry())
+    expect(requests).toHaveLength(2)
+    await respond(requests[1], '101', 6)
+    expect(session.manifestError).toBeNull()
+    expect(session.currentIndex).toBe(3)
+    expect(session.pageSrc).toBe('/api/reader/101/pages/3')
+  })
+})
