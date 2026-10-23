@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项及第 22 项已修复，第 13 项待确认，其余 32 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项及第 22 至 23 项已修复，第 13 项待确认，其余 31 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -178,11 +178,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/server/src/application/comic/mod.rs:20](E:/ppxb/jm-boom/server/src/application/comic/mod.rs:20)；[E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:185](E:/ppxb/jm-boom/server/src/application/comic/home/section.rs:185)；[E:/ppxb/jm-boom/server/src/jm/client.rs:53](E:/ppxb/jm-boom/server/src/jm/client.rs:53)；[E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:187](E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:187)；[E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:476](E:/ppxb/jm-boom/server/src/application/comic/home/tests.rs:476)。
 
-- [ ] **23 · P2 · 评论接口为前端不展示的头像串行等待图片域名查询**
+- [x] **23 · P2 · 评论接口为前端不展示的头像串行等待图片域名查询（已修复）**
 
-  评论列表拿到后仍执行 `self.image_host().await`，只用于拼接 avatar；CommentItem 和 ReplyItem 均不渲染头像。图片域名缓存失效或上游故障时，正文评论也被额外阻塞。应删除这一不被消费的依赖，或在确需头像的消费路径单独处理。
+  已修复：评论列表取得后直接映射返回，删除图片域名查询、头像拼接和仅供该流程调用的 image_host 包装。同步移除上游 photo 的反序列化字段、domain/API DTO 和前端评论类型中的 avatar，保留 API DTO/domain 边界、正文、回复与分页行为。阅读和封面使用的图片域名服务保持原有流程。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/application/comic/comments.rs:38](E:/ppxb/jm-boom/server/src/application/comic/comments.rs:38)；[E:/ppxb/jm-boom/server/src/application/comic/comments.rs:99](E:/ppxb/jm-boom/server/src/application/comic/comments.rs:99)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:141](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:141)。
+  验证：新增 1 个本地 HTTP 回归测试，模拟评论正常返回而图片域名接口持续阻塞；旧代码超过 1 秒上限，修复后有评论和空列表均正常返回，图片域名请求次数为 0，并验证回复与页码/总数。现有字段映射测试继续通过。后端全量 100 个测试、格式检查与 Clippy 通过，前端验证结果见文末。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/application/comic/comments.rs:18](E:/ppxb/jm-boom/server/src/application/comic/comments.rs:18)；[E:/ppxb/jm-boom/server/src/application/comic/comments.rs:83](E:/ppxb/jm-boom/server/src/application/comic/comments.rs:83)；[E:/ppxb/jm-boom/server/src/application/comic/comments.rs:132](E:/ppxb/jm-boom/server/src/application/comic/comments.rs:132)；[E:/ppxb/jm-boom/server/src/api/comics.rs:68](E:/ppxb/jm-boom/server/src/api/comics.rs:68)；[E:/ppxb/jm-boom/web/src/lib/api/comic.ts:43](E:/ppxb/jm-boom/web/src/lib/api/comic.ts:43)。
 
 - [ ] **24 · P2 · 多数普通查询尚未向 fetch 传递 TanStack Query 的取消信号**
 
@@ -367,16 +369,16 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 22 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。前端未改动，以下前端结果沿用第 18 项修复后的验证记录。
+第 23 项修复后重新执行了前后端测试、类型检查、lint、格式检查、构建、Clippy 与 diff 检查。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 通过 |
-| web：bun run fmt:check | 第 18 项验证时未通过：其余 113 个现有 CRLF 源码文件被报告；该项修改和新增的 2 个登录相关源码/测试文件单独检查通过。本次未修改前端文件。 |
+| web：bun run fmt:check | 未通过：修改前确认有 113 个现有 CRLF 源码文件被报告；本次修改的 src/lib/api/comic.ts 统一为 LF 并单独检查通过，其余 112 个文件保持原样。 |
 | web：bun run build | 通过 |
-| web：bun test | 107 个测试通过，包含第 18 项新增的 31 个登录跳转回归场景 |
-| server：cargo test --locked | 99 个测试通过，包含第 22 项新增的 12 个上游源页缓存回归测试 |
+| web：bun test | 107 个测试通过 |
+| server：cargo test --locked | 100 个测试通过，包含第 23 项新增的评论接口回归测试 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
 | 根目录：git diff --check | 通过 |
@@ -391,4 +393,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 17 条已修复、1 条待确认、32 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 18 条已修复、1 条待确认、31 条待处理；原生控件补充、验证记录和优化边界不计入条数。

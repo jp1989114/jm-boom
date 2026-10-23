@@ -35,16 +35,11 @@ impl ComicService {
                 })
             })
             .await?;
-        let image_host = self.image_host().await;
 
         Ok(ComicComments {
             page,
             total: payload.total,
-            comments: payload
-                .list
-                .into_iter()
-                .map(|comment| map_comment(comment, image_host.as_deref()))
-                .collect(),
+            comments: payload.list.into_iter().map(map_comment).collect(),
         })
     }
 }
@@ -79,30 +74,13 @@ struct CommentPayload {
     parent_id: String,
     #[serde(default)]
     content: String,
-    #[serde(default)]
-    photo: String,
     #[serde(default, deserialize_with = "bool_from_any")]
     spoiler: bool,
     #[serde(default, rename = "replys")]
     replies: Vec<CommentPayload>,
 }
 
-fn map_comment(payload: CommentPayload, image_host: Option<&str>) -> ComicComment {
-    let avatar = if payload.photo.starts_with("http") {
-        payload.photo
-    } else {
-        image_host
-            .filter(|_| !payload.photo.is_empty())
-            .map(|host| {
-                format!(
-                    "{}/media/users/{}",
-                    host.trim_end_matches('/'),
-                    payload.photo.trim_start_matches('/')
-                )
-            })
-            .unwrap_or_default()
-    };
-
+fn map_comment(payload: CommentPayload) -> ComicComment {
     ComicComment {
         id: payload.id,
         comic_id: payload.comic_id,
@@ -113,14 +91,9 @@ fn map_comment(payload: CommentPayload, image_host: Option<&str>) -> ComicCommen
         like_count: payload.like_count,
         time: payload.time,
         updated_at: payload.updated_at,
-        avatar,
         parent_id: payload.parent_id,
         spoiler: payload.spoiler,
-        replies: payload
-            .replies
-            .into_iter()
-            .map(|reply| map_comment(reply, image_host))
-            .collect(),
+        replies: payload.replies.into_iter().map(map_comment).collect(),
     }
 }
 
@@ -139,7 +112,115 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{map_comment, CommentListPayload};
+    use super::{map_comment, ComicService, CommentListPayload};
+    use crate::{
+        endpoint::{EndpointManager, EndpointProbe},
+        jm::{JmClient, JmError},
+    };
+    use axum::{extract::Query, http::StatusCode, routing::get, Json, Router};
+    use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::{
+        collections::HashMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
+
+    #[tokio::test]
+    async fn comments_return_without_waiting_for_image_settings() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let settings_requests = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .route(
+                "/forum",
+                get(|Query(query): Query<HashMap<String, String>>| async move {
+                    assert_eq!(query["aid"], "123");
+                    assert_eq!(query["mode"], "manhua");
+                    let list = match query["page"].as_str() {
+                        "1" => json!([{
+                            "CID": 456,
+                            "content": "comment",
+                            "photo": "avatar.jpg",
+                            "replys": [{
+                                "CID": 457,
+                                "parent_CID": 456,
+                                "content": "reply",
+                                "photo": "https://cdn.example/reply.jpg"
+                            }]
+                        }]),
+                        "2" => json!([]),
+                        page => panic!("unexpected comment page: {page}"),
+                    };
+                    Json(json!({"code": 200, "data": {"total": 1, "list": list}}))
+                }),
+            )
+            .route(
+                "/setting",
+                get({
+                    let settings_requests = settings_requests.clone();
+                    move || {
+                        let settings_requests = settings_requests.clone();
+                        async move {
+                            settings_requests.fetch_add(1, Ordering::SeqCst);
+                            std::future::pending::<StatusCode>().await
+                        }
+                    }
+                }),
+            );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        let endpoints = Arc::new(EndpointManager::new(db).await.unwrap());
+        endpoints
+            .set_probes_for_test(vec![EndpointProbe {
+                endpoint,
+                available: true,
+                latency_ms: Some(1),
+                error: None,
+            }])
+            .await;
+        let mut jm = JmClient::new().unwrap();
+        jm.client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let service = ComicService::new(Arc::new(jm), endpoints);
+
+        let result = tokio::time::timeout(Duration::from_secs(1), async {
+            let comments = service.get_comments("123".into(), 1).await?;
+            let empty = service.get_comments("123".into(), 2).await?;
+            Ok::<_, JmError>((comments, empty))
+        })
+        .await;
+        server.abort();
+        let (comments, empty) = result
+            .expect("comments must not wait for image settings")
+            .expect("fetch comments");
+
+        assert_eq!(settings_requests.load(Ordering::SeqCst), 0);
+        assert_eq!(comments.page, 1);
+        assert_eq!(comments.total, 1);
+        assert_eq!(comments.comments.len(), 1);
+        let comment = &comments.comments[0];
+        assert_eq!(comment.id, "456");
+        assert_eq!(comment.content, "comment");
+        assert_eq!(comment.replies.len(), 1);
+        assert_eq!(comment.replies[0].id, "457");
+        assert_eq!(comment.replies[0].parent_id, "456");
+        assert_eq!(comment.replies[0].content, "reply");
+        assert_eq!(empty.page, 2);
+        assert_eq!(empty.total, 1);
+        assert!(empty.comments.is_empty());
+    }
 
     #[test]
     fn preserves_upstream_comment_field_mappings() {
@@ -163,10 +244,7 @@ mod tests {
         }))
         .expect("deserialize upstream comment payload");
 
-        let comment = map_comment(
-            payload.list.into_iter().next().expect("comment"),
-            Some("https://cdn.example"),
-        );
+        let comment = map_comment(payload.list.into_iter().next().expect("comment"));
         assert_eq!(payload.total, 1);
         assert_eq!(comment.id, "456");
         assert_eq!(comment.comic_id.as_deref(), Some("123"));
@@ -175,7 +253,6 @@ mod tests {
         assert_eq!(comment.time, "created");
         assert_eq!(comment.updated_at, "updated");
         assert_eq!(comment.parent_id, "0");
-        assert_eq!(comment.avatar, "https://cdn.example/media/users/avatar.jpg");
         assert!(comment.spoiler);
     }
 }

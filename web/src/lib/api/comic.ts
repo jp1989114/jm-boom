@@ -50,7 +50,6 @@ export type ComicComment = {
   likeCount: number
   time: string
   updatedAt: string
-  avatar: string
   parentId: string
   spoiler: boolean
   replies: ComicComment[]

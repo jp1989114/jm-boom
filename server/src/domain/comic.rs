@@ -67,7 +67,6 @@ pub struct ComicComment {
     pub like_count: u32,
     pub time: String,
     pub updated_at: String,
-    pub avatar: String,
     pub parent_id: String,
     pub spoiler: bool,
     pub replies: Vec<ComicComment>,

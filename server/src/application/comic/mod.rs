@@ -57,12 +57,6 @@ impl ComicService {
         .await
     }
 
-    async fn image_host(&self) -> Option<String> {
-        self.with_failover(|client, endpoint| Box::pin(client.get_img_host(endpoint)))
-            .await
-            .ok()
-    }
-
     async fn with_failover<T, F>(&self, operation: F) -> JmResult<T>
     where
         F: for<'a> Fn(
