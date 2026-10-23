@@ -27,9 +27,7 @@ export function ComicDetailPage({ comicId }: { comicId: string }) {
     queryKey: queryKeys.comicDetail(comicId),
     queryFn: () => getComicDetail(comicId),
     staleTime: CACHE.DETAIL_STALE_TIME,
-    gcTime: CACHE.DETAIL_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+    gcTime: CACHE.DETAIL_GC_TIME
   })
   const comicState = useQuery({
     queryKey: queryKeys.comicState(comicId),

@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/select'
 import type { ComicSummary } from '@/domain/comic'
 import { searchComic } from '@/lib/api/search'
-import { CACHE } from '@/lib/constants'
 import { queryKeys } from '@/lib/query-keys'
 
 type SearchPageSearch = {
@@ -67,11 +66,7 @@ function SearchPage() {
         page,
         sortBy
       }),
-    enabled: keyword.length > 0,
-    staleTime: CACHE.LIST_STALE_TIME,
-    gcTime: CACHE.LIST_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+    enabled: keyword.length > 0
   })
   const items = query.data?.items ?? []
   const paging = query.data?.paging

@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 26 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 41 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 25 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -300,11 +300,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 冗余、过度防御和抽象整理
 
-- [ ] **41 · P3 · 多个查询重复声明 QueryClient 已有的默认配置**
+- [x] **41 · P3 · 多个查询重复声明 QueryClient 已有的默认配置（已修复）**
 
-  推荐、排行、分区、搜索、每周列表重复声明完全相同的 staleTime/gcTime/refetch 配置；详情、评论、阅读器也重复 false 的 refetch 选项。删除相同字段，只保留与默认值不同的 TTL、retry、enabled、轮询和刷新设置。
+  已修复：11 个业务文件的 13 处查询删除 33 个与全局默认值相同的选项，包括 5 个列表 staleTime、5 个列表 gcTime、10 个 refetchOnMount: false 和 13 个 refetchOnWindowFocus: false，并删除 4 处无用 CACHE 导入。全局 QueryClient 配置保持原值，保留详情、评论、阅读器和每周筛选的独立缓存时间，以及书架、收藏、下载和设置的刷新、重试、enabled 与轮询差异。3 处受影响的测试 QueryClient 补齐所需应用默认值，继续保留测试专用的 gcTime: Infinity 和 retry: false。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/features/home/page.tsx:14](E:/ppxb/jm-boom/web/src/features/home/page.tsx:14)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40](E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:61](E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:61)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62](E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:32](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:32)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8](E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19](E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19)；[E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19](E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19)。
+  验证：逐项核对删除字段，业务源码中这四类默认配置仅保留于 Providers。类型检查、构建和全部 14 个修改源码/测试文件的格式检查通过；现有测试为 95 个通过、18 个既有失败，lint 仍有 15 个既有报错。去除行号和运行耗时后，与变更前日志逐条比对均无差异，完整结果见文末。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/components/providers.tsx:11](E:/ppxb/jm-boom/web/src/components/providers.tsx:11)；[E:/ppxb/jm-boom/web/src/features/home/page.tsx:13](E:/ppxb/jm-boom/web/src/features/home/page.tsx:13)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40](E:/ppxb/jm-boom/web/src/routes/_app/explore/ranking.tsx:40)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:60](E:/ppxb/jm-boom/web/src/routes/_app/explore/list.tsx:60)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:61](E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:61)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:83](E:/ppxb/jm-boom/web/src/routes/_app/explore/weekly.tsx:83)；[E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26](E:/ppxb/jm-boom/web/src/features/comic-detail/page.tsx:26)；[E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29](E:/ppxb/jm-boom/web/src/features/comic-detail/comments.tsx:29)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8](E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:8)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19](E:/ppxb/jm-boom/web/src/features/reader/use-reader-chapter-info.ts:19)；[E:/ppxb/jm-boom/web/src/features/reader/reader-chapter-drawer.tsx:31](E:/ppxb/jm-boom/web/src/features/reader/reader-chapter-drawer.tsx:31)；[E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19](E:/ppxb/jm-boom/web/src/features/settings/use-settings-data.ts:19)。
 
 - [ ] **42 · P3 · 阅读器会话同时依赖路由 key 重建和内部 scope 重置**
 
@@ -381,15 +383,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 46 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
+第 41 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
-| web：bun run lint | 未通过：仍有 15 个既有 React 规则错误，均位于未修改文件。本次修改的 constants.ts 和 access-gate.ts 单独 lint 通过。 |
-| web：bun run fmt:check | 未通过：仍有 109 个现有 CRLF 源码文件被报告；本次修改的 constants.ts 和 access-gate.ts 统一为 LF，单独检查通过。 |
+| web：bun run lint | 未通过：仍有 15 个既有 React 规则错误，去除行号后与变更前日志逐条一致，无新增报错。 |
+| web：bun run fmt:check | 未通过：仍有 102 个未修改文件被报告；本次 14 个源码/测试文件单独检查全部通过。 |
 | web：bun run build | 通过 |
-| web：bun test | 95 个通过、18 个失败，现有 31 个门禁登录测试全部通过；18 个既有失败仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
+| web：bun test | 95 个通过、18 个失败；失败用例与变更前逐条一致，仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
 | server：cargo test --locked | 113 个测试通过，历史测试已补充第 49 项的迟到进度与相同时间戳边界；1 个磁盘延迟测量默认忽略 |
 | server：近容量缓存延迟测量（--ignored --nocapture） | 第 26 项单独运行通过，本次未重复测量；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
@@ -406,4 +408,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 23 条已修复、1 条待确认、26 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 24 条已修复、1 条待确认、25 条待处理；原生控件补充、验证记录和优化边界不计入条数。

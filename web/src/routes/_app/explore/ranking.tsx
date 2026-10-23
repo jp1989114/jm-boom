@@ -8,7 +8,6 @@ import { FilterSelect } from '@/components/filter-select'
 import { ListPagination } from '@/components/list-pagination'
 import { Button } from '@/components/ui/button'
 import { getHomeSectionList } from '@/lib/api/home'
-import { CACHE } from '@/lib/constants'
 import { queryKeys } from '@/lib/query-keys'
 import {
   rankingCategoryApiValue,
@@ -47,11 +46,7 @@ function RankingPage() {
         sectionTitle: '排行榜',
         category: rankingCategoryApiValue(search.category),
         order: search.order
-      }),
-    staleTime: CACHE.LIST_STALE_TIME,
-    gcTime: CACHE.LIST_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+      })
   })
   const items = query.data?.items ?? []
 

@@ -33,9 +33,7 @@ function WeeklyPage() {
     queryKey: queryKeys.weekFilters(),
     queryFn: getWeekFilters,
     staleTime: CACHE.FILTERS_STALE_TIME,
-    gcTime: CACHE.FILTERS_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+    gcTime: CACHE.FILTERS_GC_TIME
   })
   const categories = useMemo(() => filters.data?.categories ?? [], [filters.data?.categories])
   const types = useMemo(() => filters.data?.types ?? [], [filters.data?.types])
@@ -89,11 +87,7 @@ function WeeklyPage() {
         categoryId: selectedCategoryId,
         typeId: selectedTypeId
       }),
-    enabled: canLoadItems,
-    staleTime: CACHE.LIST_STALE_TIME,
-    gcTime: CACHE.LIST_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+    enabled: canLoadItems
   })
 
   function updateTypeId(typeId: string) {

@@ -10,8 +10,6 @@ export function useReaderManifestQuery(comicId: string) {
     queryFn: () => getComicReadManifest({ readId: comicId }),
     staleTime: CACHE.READER_STALE_TIME,
     gcTime: CACHE.READER_GC_TIME,
-    retry: false,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+    retry: false
   })
 }

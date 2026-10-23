@@ -20,16 +20,14 @@ export function useSettingsData() {
     queryKey: queryKeys.apiEndpointDiscovery(),
     queryFn: getEndpointState,
     staleTime: 30 * 1000,
-    retry: false,
-    refetchOnWindowFocus: false
+    retry: false
   })
   const systemInfo = useQuery({
     queryKey: queryKeys.settingsSystem(),
     queryFn: getSystemInfo,
     staleTime: 15 * 1000,
     retry: false,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false
+    refetchOnMount: 'always'
   })
   const account = useQuery({
     queryKey: queryKeys.settingsAccount(),

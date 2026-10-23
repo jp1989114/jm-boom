@@ -19,6 +19,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { ComicDetail } from '@/domain/comic'
 import type { ComicStateResult } from '@/lib/api/comic'
+import { CACHE } from '@/lib/constants'
 import { queryKeys } from '@/lib/query-keys'
 import { ComicDetailPage } from './page'
 import { useComicFavorite } from './use-comic-favorite'
@@ -84,7 +85,17 @@ beforeEach(() => {
   document.body.append(container)
   root = createRoot(container)
   router = createTestRouter()
-  queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity, retry: false } } })
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: CACHE.LIST_STALE_TIME,
+        gcTime: Infinity,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        retry: false
+      }
+    }
+  })
   queryClient.setQueryData(queryKeys.comicDetail('100'), { comic })
   notifyManager.setScheduler(queueMicrotask)
   notifyManager.setNotifyFunction(callback => {

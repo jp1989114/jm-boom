@@ -19,6 +19,7 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { WeekFiltersResult, WeekItemsResult } from '@/lib/api/home'
+import { CACHE } from '@/lib/constants'
 import { queryKeys } from '@/lib/query-keys'
 import { Route } from './weekly'
 
@@ -70,7 +71,17 @@ beforeEach(() => {
   const container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
-  queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity, retry: false } } })
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: CACHE.LIST_STALE_TIME,
+        gcTime: Infinity,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        retry: false
+      }
+    }
+  })
   notifyManager.setScheduler(queueMicrotask)
   requests = []
   pendingResponses = []

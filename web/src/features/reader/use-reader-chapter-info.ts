@@ -22,9 +22,7 @@ export function useReaderChapterInfo({
     enabled: albumId.length > 0,
     staleTime: CACHE.READER_STALE_TIME,
     gcTime: CACHE.READER_GC_TIME,
-    retry: false,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+    retry: false
   })
   const chapters = albumDetail.data?.comic.chapters
   const chapterInfo = useMemo(

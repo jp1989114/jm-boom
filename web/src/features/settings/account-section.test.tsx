@@ -68,7 +68,14 @@ beforeEach(() => {
   document.body.append(container)
   root = createRoot(container)
   queryClient = new QueryClient({
-    defaultOptions: { queries: { gcTime: Infinity, retry: false, refetchOnMount: false } }
+    defaultOptions: {
+      queries: {
+        gcTime: Infinity,
+        retry: false,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false
+      }
+    }
   })
   queryClient.setQueryData(accountKey, savedAccount)
   serverAccount = { ...savedAccount }

@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
 import { getHomeFeed, type HomeFeedSection } from '@/lib/api/home'
-import { CACHE } from '@/lib/constants'
 import { queryKeys } from '@/lib/query-keys'
 import { HomeFeedSections } from './home-feed-sections'
 import { HomeFeedSkeleton } from './home-feed-skeleton'
@@ -13,11 +12,7 @@ const EMPTY_HOME_SECTIONS: HomeFeedSection[] = []
 export function HomePage() {
   const homeFeed = useQuery({
     queryKey: queryKeys.homeFeed(),
-    queryFn: getHomeFeed,
-    staleTime: CACHE.LIST_STALE_TIME,
-    gcTime: CACHE.LIST_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+    queryFn: getHomeFeed
   })
   const sections = homeFeed.data?.sections ?? EMPTY_HOME_SECTIONS
 

@@ -33,8 +33,6 @@ export function CommentsDrawer({ comicId, total, open, onOpenChange }: CommentsD
     enabled: open,
     staleTime: CACHE.COMMENTS_STALE_TIME,
     gcTime: CACHE.COMMENTS_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
     getNextPageParam: (lastPage, allPages) => {
       const loadedCount = allPages.reduce((sum, page) => sum + page.comments.length, 0)
 
@@ -49,14 +47,8 @@ export function CommentsDrawer({ comicId, total, open, onOpenChange }: CommentsD
     () => commentsQuery.data?.pages.flatMap(page => page.comments) ?? [],
     [commentsQuery.data]
   )
-  const {
-    fetchNextPage,
-    hasNextPage,
-    isError,
-    isFetchingNextPage,
-    isLoading,
-    refetch
-  } = commentsQuery
+  const { fetchNextPage, hasNextPage, isError, isFetchingNextPage, isLoading, refetch } =
+    commentsQuery
   const commentTotal = commentsQuery.data?.pages[0]?.total ?? total
 
   const handleScroll = useCallback(
@@ -94,12 +86,7 @@ export function CommentsDrawer({ comicId, total, open, onOpenChange }: CommentsD
               emoji="Ò︵Ó"
               title="数据加载失败"
               actions={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => refetch()}
-                >
+                <Button type="button" variant="outline" size="sm" onClick={() => refetch()}>
                   重试
                 </Button>
               }
@@ -111,10 +98,7 @@ export function CommentsDrawer({ comicId, total, open, onOpenChange }: CommentsD
               {comments.map(comment => (
                 <CommentItem key={comment.id} comment={comment} />
               ))}
-              <CommentsEndState
-                isFetchingNextPage={isFetchingNextPage}
-                hasNextPage={hasNextPage}
-              />
+              <CommentsEndState isFetchingNextPage={isFetchingNextPage} hasNextPage={hasNextPage} />
             </div>
           )}
         </div>

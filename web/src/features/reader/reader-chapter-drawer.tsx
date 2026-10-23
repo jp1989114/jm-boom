@@ -34,8 +34,7 @@ export function ReaderChapterDrawer({
     enabled: open,
     staleTime: 5000,
     refetchInterval: open ? 2000 : false,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false
+    refetchOnMount: 'always'
   })
   const downloadedChapterIds = useMemo(
     () => new Set(downloadedChapters.data?.chapterIds ?? []),

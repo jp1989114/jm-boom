@@ -8,7 +8,6 @@ import { ListPagination } from '@/components/list-pagination'
 import { PageBackButton } from '@/components/page-back-button'
 import { Button } from '@/components/ui/button'
 import { getHomeSectionList, type HomeSectionListMode } from '@/lib/api/home'
-import { CACHE } from '@/lib/constants'
 import { queryKeys } from '@/lib/query-keys'
 import { rankingCategoryApiValue } from '@/lib/filters'
 import { parsePositivePage, parseStringSearch } from '@/lib/utils'
@@ -75,11 +74,7 @@ function HomeSectionListPage() {
               : null,
         week: search.mode === 'weekly' ? search.week : null,
         order: search.mode === 'ranking' ? search.order : null
-      }),
-    staleTime: CACHE.LIST_STALE_TIME,
-    gcTime: CACHE.LIST_GC_TIME,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false
+      })
   })
   const items = query.data?.items ?? []
   const title = query.data?.title || search.title || sectionModeTitle(search.mode)
