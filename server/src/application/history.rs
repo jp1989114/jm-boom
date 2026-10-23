@@ -151,9 +151,29 @@ impl ReadingHistoryService {
         let last_read_at = input
             .last_read_at
             .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-        let mut transaction = self.db.begin().await?;
-        persist_item(&mut transaction, comic_id, input, last_read_at).await?;
-        transaction.commit().await?;
+        sqlx::query(
+            "INSERT INTO reading_history \
+             (comic_id, title, author, image, chapter_id, chapter_title, \
+              page_index, page_count, last_read_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT(comic_id) DO UPDATE SET \
+             title = excluded.title, author = excluded.author, image = excluded.image, \
+             chapter_id = excluded.chapter_id, chapter_title = excluded.chapter_title, \
+             page_index = excluded.page_index, page_count = excluded.page_count, \
+             last_read_at = excluded.last_read_at \
+             WHERE excluded.last_read_at >= reading_history.last_read_at",
+        )
+        .bind(comic_id)
+        .bind(input.title)
+        .bind(input.author)
+        .bind(input.image)
+        .bind(input.chapter_id)
+        .bind(input.chapter_title)
+        .bind(input.page_index)
+        .bind(input.page_count)
+        .bind(last_read_at)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 
@@ -182,38 +202,6 @@ impl ReadingHistoryService {
     }
 }
 
-async fn persist_item(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    comic_id: &str,
-    input: ReadingHistoryInput,
-    last_read_at: i64,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO reading_history \
-         (comic_id, title, author, image, chapter_id, chapter_title, \
-          page_index, page_count, last_read_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
-         ON CONFLICT(comic_id) DO UPDATE SET \
-         title = excluded.title, author = excluded.author, image = excluded.image, \
-         chapter_id = excluded.chapter_id, chapter_title = excluded.chapter_title, \
-         page_index = excluded.page_index, page_count = excluded.page_count, \
-         last_read_at = excluded.last_read_at \
-         WHERE excluded.last_read_at >= reading_history.last_read_at",
-    )
-    .bind(comic_id)
-    .bind(input.title)
-    .bind(input.author)
-    .bind(input.image)
-    .bind(input.chapter_id)
-    .bind(input.chapter_title)
-    .bind(input.page_index)
-    .bind(input.page_count)
-    .bind(last_read_at)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{ReadingHistoryInput, ReadingHistoryService};
@@ -234,6 +222,10 @@ mod tests {
             .upsert("1", test_input("chapter-new", 3, 30))
             .await
             .expect("update progress");
+        service
+            .upsert("1", test_input("chapter-delayed", 2, 25))
+            .await
+            .expect("ignore delayed older progress");
 
         let (items, total) = service.list(1, 1).await.expect("list first page");
         assert_eq!(total, 2);
@@ -250,7 +242,21 @@ mod tests {
             .expect("history item");
         assert_eq!(item.chapter_id, "chapter-new");
         assert_eq!(item.page_index, 3);
+        assert_eq!(item.last_read_at, 30);
         assert!(service.get("3").await.expect("missing history").is_none());
+
+        service
+            .upsert("1", test_input("chapter-equal-time", 4, 30))
+            .await
+            .expect("accept an update with the same timestamp");
+        let item = service
+            .get("1")
+            .await
+            .expect("get updated history")
+            .expect("history item");
+        assert_eq!(item.chapter_id, "chapter-equal-time");
+        assert_eq!(item.page_index, 4);
+        assert_eq!(item.last_read_at, 30);
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项及第 25 至 27 项已修复，第 13 项待确认，其余 28 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项及第 49 项已修复，第 13 项待确认，其余 27 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -348,11 +348,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/server/src/jm/chapter.rs:102](E:/ppxb/jm-boom/server/src/jm/chapter.rs:102)；[E:/ppxb/jm-boom/server/src/jm/chapter.rs:134](E:/ppxb/jm-boom/server/src/jm/chapter.rs:134)。
 
-- [ ] **49 · P3 · 阅读历史单条 UPSERT 外层保留了不必要的显式事务**
+- [x] **49 · P3 · 阅读历史单条 UPSERT 外层保留了不必要的显式事务（已修复）**
 
-  `upsert` 的事务里只执行一次 INSERT ... ON CONFLICT，没有配套写操作；SQLite 单条语句自身已具备原子性。应直接执行该 UPSERT 并删除只为传递 transaction 的辅助层，保留时间戳防旧覆盖条件。
+  已修复：将原有单条 UPSERT 放回 upsert，通过连接池直接执行，删除显式 begin/commit 和仅用于传递事务的 persist_item 辅助函数。保持 SQL、参数绑定、默认时间戳和错误传播不变，依靠 SQLite 单语句原子性继续执行 `excluded.last_read_at >= reading_history.last_read_at`，防止迟到的旧进度覆盖新记录。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/application/history.rs:150](E:/ppxb/jm-boom/server/src/application/history.rs:150)；[E:/ppxb/jm-boom/server/src/application/history.rs:186](E:/ppxb/jm-boom/server/src/application/history.rs:186)。
+  验证：扩展现有阅读历史测试，确认较旧时间戳的迟到请求不改变章节、页码、时间戳或排序，相同时间戳仍允许更新。后端全量 113 个常规测试、格式检查和 Clippy 通过。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/application/history.rs:150](E:/ppxb/jm-boom/server/src/application/history.rs:150)；[E:/ppxb/jm-boom/server/src/application/history.rs:164](E:/ppxb/jm-boom/server/src/application/history.rs:164)；[E:/ppxb/jm-boom/server/src/application/history.rs:211](E:/ppxb/jm-boom/server/src/application/history.rs:211)。
 
 - [ ] **50 · P3 · 探索列表重复 loading/error/empty/grid/pagination 拼装**
 
@@ -377,7 +379,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 25 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。本次未改动前端，以下前端结果沿用第 27 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
+第 49 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。本次未改动前端，以下前端结果沿用第 27 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
 
 | 命令 | 结果 |
 | --- | --- |
@@ -386,7 +388,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 | web：bun run fmt:check | 第 27 项验证时未通过：修改前有 112 个现有 CRLF 源码文件被报告，该项修改的 reader-image.tsx 统一为 LF，与新增测试文件均单独检查通过，其余 111 个文件保持原样。本次未修改前端文件。 |
 | web：bun run build | 通过 |
 | web：bun test | 95 个通过、18 个失败；新增 6 个图片尺寸缓存回归测试全部通过。排除新增测试后，原有 107 个测试仍为 89 个通过、同样 18 个失败，涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
-| server：cargo test --locked | 113 个测试通过，包含第 25 项新增的 8 个预热队列回归测试；1 个磁盘延迟测量默认忽略 |
+| server：cargo test --locked | 113 个测试通过，历史测试已补充第 49 项的迟到进度与相同时间戳边界；1 个磁盘延迟测量默认忽略 |
 | server：近容量缓存延迟测量（--ignored --nocapture） | 第 26 项单独运行通过，本次未重复测量；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -402,4 +404,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 21 条已修复、1 条待确认、28 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 22 条已修复、1 条待确认、27 条待处理；原生控件补充、验证记录和优化边界不计入条数。
