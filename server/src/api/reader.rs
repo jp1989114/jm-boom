@@ -12,14 +12,14 @@ use axum::{
 };
 use serde::Serialize;
 use std::{sync::Arc, time::Instant};
-use tokio::sync::Semaphore;
+
+mod prewarm;
+use prewarm::PagePrewarmQueue;
 
 const MANIFEST_PREWARM_COUNT: u32 = 5;
 const PAGE_PREWARM_COUNT: u32 = 3;
-const PAGE_PREWARM_CONCURRENCY: usize = 2;
-
-static PAGE_PREWARM_SEMAPHORE: std::sync::LazyLock<Arc<Semaphore>> =
-    std::sync::LazyLock::new(|| Arc::new(Semaphore::new(PAGE_PREWARM_CONCURRENCY)));
+static PAGE_PREWARM_QUEUE: std::sync::LazyLock<Arc<PagePrewarmQueue>> =
+    std::sync::LazyLock::new(|| Arc::new(PagePrewarmQueue::default()));
 
 #[derive(Serialize)]
 pub struct ManifestResponse {
@@ -168,11 +168,7 @@ fn prewarm_pages(app: AppState, chapter_id: String, start_page: u32, count: u32)
     for page in start_page..start_page.saturating_add(count) {
         let app = app.clone();
         let chapter_id = chapter_id.clone();
-        tokio::spawn(async move {
-            let Ok(_permit) = PAGE_PREWARM_SEMAPHORE.clone().acquire_owned().await else {
-                return;
-            };
-
+        PAGE_PREWARM_QUEUE.enqueue(chapter_id.clone(), page, async move {
             if let Err(error) =
                 materialize_page(&app, &chapter_id, page, ImageWorkPriority::Prefetch).await
             {

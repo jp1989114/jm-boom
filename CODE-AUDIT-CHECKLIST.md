@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项及第 26 至 27 项已修复，第 13 项待确认，其余 29 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项及第 25 至 27 项已修复，第 13 项待确认，其余 28 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -192,11 +192,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/lib/api/client.ts:118](E:/ppxb/jm-boom/web/src/lib/api/client.ts:118)；[E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62](E:/ppxb/jm-boom/web/src/routes/_app/explore/search.tsx:62)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:9](E:/ppxb/jm-boom/web/src/features/reader/use-reader-manifest-query.ts:9)；[E:/ppxb/jm-boom/web/src/lib/api/reader.ts:15](E:/ppxb/jm-boom/web/src/lib/api/reader.ts:15)。
 
-- [ ] **25 · P2 · 服务端预热只限制执行并发，没有限制排队任务数量**
+- [x] **25 · P2 · 服务端预热只限制执行并发，没有限制排队任务数量（已修复）**
 
-  `prewarm_pages` 先为每页 `tokio::spawn`，再在任务内部等待两个许可。连续翻页或多设备阅读时，过时且重复的预热任务可持续堆积；single-flight 仅合并物化工作，并不消除这些待执行任务。应给预热队列加容量及去重/丢弃过期任务规则，继续复用页面物化服务。
+  已修复：预热队列最多保留 32 个等待项，取得执行名额后才创建 Tokio 任务，同时最多执行 2 项。按章节 ID 和页码对执行项、等待项去重；重复请求更新等待项的时间和队列位置，队列满时淘汰最旧的等待项，入队及调度时丢弃等待满 30 秒的项目。完成后释放执行标记并继续调度；被替换、淘汰和过期的工作立即释放所持状态。不同章节独立去重，不按最新章节清空其他读者的请求。已经开始的工作沿用现有完成流程，继续复用缓存、离线读取和共享页面物化服务及其优先级、single-flight、重试和解扰逻辑。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/api/reader.rs:166](E:/ppxb/jm-boom/server/src/api/reader.rs:166)；[E:/ppxb/jm-boom/server/src/page_materializer.rs:116](E:/ppxb/jm-boom/server/src/page_materializer.rs:116)。
+  验证：新增 8 个实际 Tokio 调度回归测试，覆盖一万次请求的容量和对象引用上限、执行及等待项去重、不同章节隔离、执行前过期检查、重复请求续期、失败后继续调度、完成后再次请求，以及 4 个线程上的 8 个并发读者。一万次请求后仅保留 2 个执行项和最后 32 个等待项，执行峰值为 2；被丢弃请求的状态引用已释放。后端全量 113 个常规测试、格式检查和 Clippy 通过。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/api/reader.rs:167](E:/ppxb/jm-boom/server/src/api/reader.rs:167)；[E:/ppxb/jm-boom/server/src/api/reader/prewarm.rs:38](E:/ppxb/jm-boom/server/src/api/reader/prewarm.rs:38)；[E:/ppxb/jm-boom/server/src/api/reader/prewarm.rs:90](E:/ppxb/jm-boom/server/src/api/reader/prewarm.rs:90)；[E:/ppxb/jm-boom/server/src/api/reader/prewarm/tests.rs:64](E:/ppxb/jm-boom/server/src/api/reader/prewarm/tests.rs:64)；[E:/ppxb/jm-boom/server/src/api/reader/prewarm/tests.rs:204](E:/ppxb/jm-boom/server/src/api/reader/prewarm/tests.rs:204)。
 
 - [x] **26 · P2 · 缓存淘汰在全局写锁内逐条删文件和提交 SQL（已修复）**
 
@@ -375,17 +377,17 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 27 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 26 项修复后的验证记录。
+第 25 项修复后重新执行了后端测试、格式检查、Clippy 与 diff 检查。本次未改动前端，以下前端结果沿用第 27 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 未通过：当前工具链报告 15 个既有 React 规则错误；原版 reader-image.tsx 单独检查同样触发 set-state-in-effect，其余报错均位于未修改文件。新增测试文件单独 lint 通过。 |
-| web：bun run fmt:check | 未通过：修改前有 112 个现有 CRLF 源码文件被报告；本次修改的 reader-image.tsx 统一为 LF，与新增测试文件均单独检查通过，其余 111 个文件保持原样。 |
+| web：bun run fmt:check | 第 27 项验证时未通过：修改前有 112 个现有 CRLF 源码文件被报告，该项修改的 reader-image.tsx 统一为 LF，与新增测试文件均单独检查通过，其余 111 个文件保持原样。本次未修改前端文件。 |
 | web：bun run build | 通过 |
 | web：bun test | 95 个通过、18 个失败；新增 6 个图片尺寸缓存回归测试全部通过。排除新增测试后，原有 107 个测试仍为 89 个通过、同样 18 个失败，涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
-| server：cargo test --locked | 105 个测试通过，包含第 26 项新增的 5 个淘汰回归测试；1 个磁盘延迟测量默认忽略 |
-| server：近容量缓存延迟测量（--ignored --nocapture） | 单独运行通过；条件、结果和完整命令见第 26 项 |
+| server：cargo test --locked | 113 个测试通过，包含第 25 项新增的 8 个预热队列回归测试；1 个磁盘延迟测量默认忽略 |
+| server：近容量缓存延迟测量（--ignored --nocapture） | 第 26 项单独运行通过，本次未重复测量；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
 | 根目录：git diff --check | 通过 |
@@ -400,4 +402,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 20 条已修复、1 条待确认、29 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 21 条已修复、1 条待确认、28 条待处理；原生控件补充、验证记录和优化边界不计入条数。
