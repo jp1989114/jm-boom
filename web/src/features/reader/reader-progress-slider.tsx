@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -16,7 +16,6 @@ export function ReaderProgressSlider({
   const [isScrubbing, setIsScrubbing] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
   const [previewIndex, setPreviewIndex] = useState(currentIndex)
-  const previewIndexRef = useRef(currentIndex)
   const isInteracting = isScrubbing || isFocused
   const safePreviewIndex = clampIndex(previewIndex, rangeMax)
   const displayIndex = isInteracting ? safePreviewIndex : currentIndex
@@ -27,19 +26,16 @@ export function ReaderProgressSlider({
       return
     }
 
-    previewIndexRef.current = currentIndex
     setPreviewIndex(currentIndex)
   }, [currentIndex, isInteracting])
 
   const updatePreview = (index: number) => {
     const nextIndex = clampIndex(index, rangeMax)
-    previewIndexRef.current = nextIndex
     setPreviewIndex(nextIndex)
   }
 
   const commitPreview = (index: number) => {
     const nextIndex = clampIndex(index, rangeMax)
-    previewIndexRef.current = nextIndex
     setPreviewIndex(nextIndex)
 
     if (nextIndex !== currentIndex) {
@@ -48,7 +44,6 @@ export function ReaderProgressSlider({
   }
 
   const cancelPreview = () => {
-    previewIndexRef.current = currentIndex
     setPreviewIndex(currentIndex)
   }
 

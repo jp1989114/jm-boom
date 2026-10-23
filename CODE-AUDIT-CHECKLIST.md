@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 41 至 42 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 24 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 41 至 43 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 23 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -316,11 +316,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/routes/reader/$comicId.tsx:18](E:/ppxb/jm-boom/web/src/routes/reader/$comicId.tsx:18)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:29](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:29)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:45](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:45)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:77](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.ts:77)；[E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.test.tsx:157](E:/ppxb/jm-boom/web/src/features/reader/use-reader-session.test.tsx:157)。
 
-- [ ] **43 · P3 · 进度滑块保留了只写不读的 ref**
+- [x] **43 · P3 · 进度滑块保留了只写不读的 ref（已修复）**
 
-  `previewIndexRef` 初始化后只被赋值，从未读取；真正渲染和提交依赖 previewIndex/currentIndex。应删除该 ref 及相应赋值，减少冗余状态来源。
+  已修复：删除 previewIndexRef、4 处只写赋值和无用的 useRef 导入。保留 previewIndex/currentIndex 状态、页码夹取、预览/提交/取消回调与滑块事件绑定，提交仍直接使用滑块事件传入的页码。
 
-  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/reader-progress-slider.tsx:19](E:/ppxb/jm-boom/web/src/features/reader/reader-progress-slider.tsx:19)。
+  验证：源码搜索确认不再存在 previewIndexRef，类型检查、构建和修改文件格式检查通过。现有前端测试为 103 个通过、18 个既有失败；失败用例及 15 条 lint 报错均与变更前一致，未新增测试或改动交互逻辑。
+
+  完整路径：[E:/ppxb/jm-boom/web/src/features/reader/reader-progress-slider.tsx:18](E:/ppxb/jm-boom/web/src/features/reader/reader-progress-slider.tsx:18)。
 
 - [ ] **44 · P3 · API 层的纯数字 ID 和页码校验重复实现**
 
@@ -385,15 +387,15 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 42 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
+第 43 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
 
 | 命令 | 结果 |
 | --- | --- |
 | web：bun x tsc --noEmit | 通过 |
 | web：bun run lint | 未通过：仍有 15 个既有 React 规则错误，去除行号后与变更前日志逐条一致，无新增报错。 |
-| web：bun run fmt:check | 未通过：仍有 101 个未修改文件被报告；本次会话 hook 和新增测试文件单独检查全部通过。 |
+| web：bun run fmt:check | 未通过：仍有 100 个未修改文件被报告；本次修改的 reader-progress-slider.tsx 单独检查通过。 |
 | web：bun run build | 通过 |
-| web：bun test | 103 个通过、18 个失败，新增 8 个阅读会话回归测试全部通过；失败用例与变更前逐条一致，仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
+| web：bun test | 103 个通过、18 个失败；失败用例与变更前逐条一致，仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
 | server：cargo test --locked | 113 个测试通过，历史测试已补充第 49 项的迟到进度与相同时间戳边界；1 个磁盘延迟测量默认忽略 |
 | server：近容量缓存延迟测量（--ignored --nocapture） | 第 26 项单独运行通过，本次未重复测量；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
@@ -410,4 +412,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 25 条已修复、1 条待确认、24 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 26 条已修复、1 条待确认、23 条待处理；原生控件补充、验证记录和优化边界不计入条数。
