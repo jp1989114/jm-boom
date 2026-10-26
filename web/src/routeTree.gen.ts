@@ -9,29 +9,29 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
-import { Route as ReaderComicIdRouteImport } from './routes/reader/$comicId'
-import { Route as AppSettingsRouteImport } from './routes/_app/settings'
-import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
-import { Route as AppExploreRouteImport } from './routes/_app/explore'
-import { Route as AppDownloadsRouteImport } from './routes/_app/downloads'
 import { Route as AppBookshelfRouteImport } from './routes/_app/bookshelf'
-import { Route as AppExploreIndexRouteImport } from './routes/_app/explore/index'
-import { Route as AppExploreWeeklyRouteImport } from './routes/_app/explore/weekly'
-import { Route as AppExploreSearchRouteImport } from './routes/_app/explore/search'
-import { Route as AppExploreRankingRouteImport } from './routes/_app/explore/ranking'
-import { Route as AppExploreListRouteImport } from './routes/_app/explore/list'
+import { Route as AppDownloadsRouteImport } from './routes/_app/downloads'
+import { Route as AppExploreRouteImport } from './routes/_app/explore'
+import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as ReaderComicIdRouteImport } from './routes/reader/$comicId'
 import { Route as AppComicComicIdRouteImport } from './routes/_app/comic/$comicId'
+import { Route as AppExploreIndexRouteImport } from './routes/_app/explore/index'
+import { Route as AppExploreListRouteImport } from './routes/_app/explore/list'
+import { Route as AppExploreRankingRouteImport } from './routes/_app/explore/ranking'
+import { Route as AppExploreSearchRouteImport } from './routes/_app/explore/search'
+import { Route as AppExploreWeeklyRouteImport } from './routes/_app/explore/weekly'
 
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -39,24 +39,9 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
-const ReaderComicIdRoute = ReaderComicIdRouteImport.update({
-  id: '/reader/$comicId',
-  path: '/reader/$comicId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppFavoritesRoute = AppFavoritesRouteImport.update({
-  id: '/favorites',
-  path: '/favorites',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppExploreRoute = AppExploreRouteImport.update({
-  id: '/explore',
-  path: '/explore',
+const AppBookshelfRoute = AppBookshelfRouteImport.update({
+  id: '/bookshelf',
+  path: '/bookshelf',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDownloadsRoute = AppDownloadsRouteImport.update({
@@ -64,9 +49,29 @@ const AppDownloadsRoute = AppDownloadsRouteImport.update({
   path: '/downloads',
   getParentRoute: () => AppRoute,
 } as any)
-const AppBookshelfRoute = AppBookshelfRouteImport.update({
-  id: '/bookshelf',
-  path: '/bookshelf',
+const AppExploreRoute = AppExploreRouteImport.update({
+  id: '/explore',
+  path: '/explore',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFavoritesRoute = AppFavoritesRouteImport.update({
+  id: '/favorites',
+  path: '/favorites',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const ReaderComicIdRoute = ReaderComicIdRouteImport.update({
+  id: '/reader/$comicId',
+  path: '/reader/$comicId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppComicComicIdRoute = AppComicComicIdRouteImport.update({
+  id: '/comic/$comicId',
+  path: '/comic/$comicId',
   getParentRoute: () => AppRoute,
 } as any)
 const AppExploreIndexRoute = AppExploreIndexRouteImport.update({
@@ -74,14 +79,9 @@ const AppExploreIndexRoute = AppExploreIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppExploreRoute,
 } as any)
-const AppExploreWeeklyRoute = AppExploreWeeklyRouteImport.update({
-  id: '/weekly',
-  path: '/weekly',
-  getParentRoute: () => AppExploreRoute,
-} as any)
-const AppExploreSearchRoute = AppExploreSearchRouteImport.update({
-  id: '/search',
-  path: '/search',
+const AppExploreListRoute = AppExploreListRouteImport.update({
+  id: '/list',
+  path: '/list',
   getParentRoute: () => AppExploreRoute,
 } as any)
 const AppExploreRankingRoute = AppExploreRankingRouteImport.update({
@@ -89,15 +89,15 @@ const AppExploreRankingRoute = AppExploreRankingRouteImport.update({
   path: '/ranking',
   getParentRoute: () => AppExploreRoute,
 } as any)
-const AppExploreListRoute = AppExploreListRouteImport.update({
-  id: '/list',
-  path: '/list',
+const AppExploreSearchRoute = AppExploreSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => AppExploreRoute,
 } as any)
-const AppComicComicIdRoute = AppComicComicIdRouteImport.update({
-  id: '/comic/$comicId',
-  path: '/comic/$comicId',
-  getParentRoute: () => AppRoute,
+const AppExploreWeeklyRoute = AppExploreWeeklyRouteImport.update({
+  id: '/weekly',
+  path: '/weekly',
+  getParentRoute: () => AppExploreRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -208,18 +208,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_app': {
       id: '/_app'
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -229,32 +229,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/reader/$comicId': {
-      id: '/reader/$comicId'
-      path: '/reader/$comicId'
-      fullPath: '/reader/$comicId'
-      preLoaderRoute: typeof ReaderComicIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app/settings': {
-      id: '/_app/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/favorites': {
-      id: '/_app/favorites'
-      path: '/favorites'
-      fullPath: '/favorites'
-      preLoaderRoute: typeof AppFavoritesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/explore': {
-      id: '/_app/explore'
-      path: '/explore'
-      fullPath: '/explore'
-      preLoaderRoute: typeof AppExploreRouteImport
+    '/_app/bookshelf': {
+      id: '/_app/bookshelf'
+      path: '/bookshelf'
+      fullPath: '/bookshelf'
+      preLoaderRoute: typeof AppBookshelfRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/downloads': {
@@ -264,11 +243,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDownloadsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/bookshelf': {
-      id: '/_app/bookshelf'
-      path: '/bookshelf'
-      fullPath: '/bookshelf'
-      preLoaderRoute: typeof AppBookshelfRouteImport
+    '/_app/explore': {
+      id: '/_app/explore'
+      path: '/explore'
+      fullPath: '/explore'
+      preLoaderRoute: typeof AppExploreRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/favorites': {
+      id: '/_app/favorites'
+      path: '/favorites'
+      fullPath: '/favorites'
+      preLoaderRoute: typeof AppFavoritesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/reader/$comicId': {
+      id: '/reader/$comicId'
+      path: '/reader/$comicId'
+      fullPath: '/reader/$comicId'
+      preLoaderRoute: typeof ReaderComicIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/comic/$comicId': {
+      id: '/_app/comic/$comicId'
+      path: '/comic/$comicId'
+      fullPath: '/comic/$comicId'
+      preLoaderRoute: typeof AppComicComicIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/explore/': {
@@ -278,18 +285,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppExploreIndexRouteImport
       parentRoute: typeof AppExploreRoute
     }
-    '/_app/explore/weekly': {
-      id: '/_app/explore/weekly'
-      path: '/weekly'
-      fullPath: '/explore/weekly'
-      preLoaderRoute: typeof AppExploreWeeklyRouteImport
-      parentRoute: typeof AppExploreRoute
-    }
-    '/_app/explore/search': {
-      id: '/_app/explore/search'
-      path: '/search'
-      fullPath: '/explore/search'
-      preLoaderRoute: typeof AppExploreSearchRouteImport
+    '/_app/explore/list': {
+      id: '/_app/explore/list'
+      path: '/list'
+      fullPath: '/explore/list'
+      preLoaderRoute: typeof AppExploreListRouteImport
       parentRoute: typeof AppExploreRoute
     }
     '/_app/explore/ranking': {
@@ -299,19 +299,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppExploreRankingRouteImport
       parentRoute: typeof AppExploreRoute
     }
-    '/_app/explore/list': {
-      id: '/_app/explore/list'
-      path: '/list'
-      fullPath: '/explore/list'
-      preLoaderRoute: typeof AppExploreListRouteImport
+    '/_app/explore/search': {
+      id: '/_app/explore/search'
+      path: '/search'
+      fullPath: '/explore/search'
+      preLoaderRoute: typeof AppExploreSearchRouteImport
       parentRoute: typeof AppExploreRoute
     }
-    '/_app/comic/$comicId': {
-      id: '/_app/comic/$comicId'
-      path: '/comic/$comicId'
-      fullPath: '/comic/$comicId'
-      preLoaderRoute: typeof AppComicComicIdRouteImport
-      parentRoute: typeof AppRoute
+    '/_app/explore/weekly': {
+      id: '/_app/explore/weekly'
+      path: '/weekly'
+      fullPath: '/explore/weekly'
+      preLoaderRoute: typeof AppExploreWeeklyRouteImport
+      parentRoute: typeof AppExploreRoute
     }
   }
 }
