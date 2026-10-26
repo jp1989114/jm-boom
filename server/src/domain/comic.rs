@@ -11,6 +11,7 @@ pub struct ComicDetail {
     pub total_views: u32,
     pub likes: u32,
     pub comment_count: u32,
+    pub total_photos: u32,
     pub related_comics: Vec<RelatedComic>,
     pub chapters: Vec<ComicChapter>,
 }
@@ -76,7 +77,11 @@ pub struct ComicComment {
 pub struct RelatedComic {
     pub id: String,
     pub title: String,
-    pub author: String,
+    pub authors: Vec<String>,
+    pub categories: Vec<String>,
+    pub tags: Vec<String>,
+    pub works: Vec<String>,
+    pub actors: Vec<String>,
     pub image: String,
 }
 

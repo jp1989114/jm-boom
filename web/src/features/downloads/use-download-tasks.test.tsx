@@ -37,6 +37,7 @@ const comic: ComicDetail = {
   totalViews: 0,
   likes: 0,
   commentCount: 0,
+  totalPhotos: 0,
   relatedComics: [],
   chapters: [{ id: '101', title: 'Chapter 1', sort: '1' }]
 }

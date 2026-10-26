@@ -1,4 +1,7 @@
+import { Link } from '@tanstack/react-router'
+
 import { ComicCard, ComicRail, ComicRailItem } from '@/components/comic'
+import { Badge } from '@/components/ui/badge'
 import type { RelatedComic } from '@/domain/comic'
 
 export function RelatedPanel({ items }: { items: RelatedComic[] }) {
@@ -24,10 +27,29 @@ export function RelatedPanel({ items }: { items: RelatedComic[] }) {
                 }}
                 metadata={
                   <p className="line-clamp-1 text-xs text-muted-foreground">
-                    {item.author.trim() || 'N/A'}
+                    {item.authors.join(' / ') || 'N/A'}
                   </p>
                 }
               />
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {Array.from(
+                  new Set([
+                    ...item.authors,
+                    ...item.categories,
+                    ...item.tags,
+                    ...item.works,
+                    ...item.actors
+                  ])
+                )
+                  .slice(0, 6)
+                  .map(value => (
+                    <Badge key={value} variant="secondary" asChild className="max-w-full">
+                      <Link to="/explore/search" search={{ q: value }} title={value}>
+                        <span className="truncate">{value}</span>
+                      </Link>
+                    </Badge>
+                  ))}
+              </div>
             </ComicRailItem>
           ))}
         </ComicRail>

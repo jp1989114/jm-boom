@@ -9,7 +9,12 @@ export type ComicSummary = {
 
 export type ComicCardSummary = Pick<ComicSummary, 'id' | 'title' | 'image'>
 
-export type RelatedComic = Pick<ComicSummary, 'id' | 'title' | 'author' | 'image'>
+export type RelatedComic = Pick<ComicSummary, 'id' | 'title' | 'image' | 'tags'> & {
+  authors: string[]
+  categories: string[]
+  works: string[]
+  actors: string[]
+}
 
 export type ComicChapter = {
   id: string
@@ -24,6 +29,7 @@ export type ComicDetail = Omit<ComicSummary, 'author'> & {
   totalViews: number
   likes: number
   commentCount: number
+  totalPhotos: number
   relatedComics: RelatedComic[]
   chapters: ComicChapter[]
 }

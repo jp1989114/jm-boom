@@ -23,6 +23,7 @@ type ComicDetailResponse = {
   totalViews: number
   likes: number
   commentCount: number
+  totalPhotos: number
   relatedComics: RelatedComicResponse[]
   chapters: ComicChapterResponse[]
 }
@@ -30,7 +31,11 @@ type ComicDetailResponse = {
 type RelatedComicResponse = {
   id: string
   title: string
-  author: string
+  authors: string[]
+  categories: string[]
+  tags: string[]
+  works: string[]
+  actors: string[]
   image: string
 }
 
@@ -124,10 +129,15 @@ function mapComicDetail(response: ComicDetailResponse): ComicDetail {
     totalViews: response.totalViews,
     likes: response.likes,
     commentCount: response.commentCount,
+    totalPhotos: response.totalPhotos,
     relatedComics: response.relatedComics.map(related => ({
       id: related.id,
       title: related.title,
-      author: related.author,
+      authors: related.authors,
+      categories: related.categories,
+      tags: related.tags,
+      works: related.works,
+      actors: related.actors,
       image: related.image
     })),
     chapters: response.chapters.map(chapter => ({

@@ -158,13 +158,22 @@ impl JmClient {
             total_views: payload.total_views,
             likes: payload.likes,
             comment_count: payload.comment_total,
+            total_photos: payload.total_photos,
             related_comics: payload
                 .related_list
                 .into_iter()
                 .map(|related| RelatedComic {
                     id: related.id,
                     title: related.name,
-                    author: related.author,
+                    authors: related.author,
+                    categories: [related.category, related.category_sub]
+                        .into_iter()
+                        .flatten()
+                        .map(|category| category.title)
+                        .collect(),
+                    tags: related.tags,
+                    works: related.works,
+                    actors: related.actors,
                     image: related.image,
                 })
                 .collect(),

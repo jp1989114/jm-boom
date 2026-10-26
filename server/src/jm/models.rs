@@ -100,6 +100,8 @@ pub(crate) struct ComicDetailPayload {
     pub likes: u32,
     #[serde(default, deserialize_with = "u32_from_any")]
     pub comment_total: u32,
+    #[serde(default, deserialize_with = "u32_from_any")]
+    pub total_photos: u32,
     #[serde(default)]
     pub related_list: Vec<RelatedComicPayload>,
     #[serde(default)]
@@ -111,10 +113,24 @@ pub(crate) struct RelatedComicPayload {
     #[serde(deserialize_with = "string_from_any")]
     pub id: String,
     pub name: String,
-    #[serde(default)]
-    pub author: String,
+    #[serde(default, deserialize_with = "lossy_string_vec_from_array_or_scalar")]
+    pub author: Vec<String>,
+    #[serde(default, deserialize_with = "lossy_string_vec_from_array_or_scalar")]
+    pub tags: Vec<String>,
+    #[serde(default, deserialize_with = "lossy_string_vec_from_array_or_scalar")]
+    pub works: Vec<String>,
+    #[serde(default, deserialize_with = "lossy_string_vec_from_array_or_scalar")]
+    pub actors: Vec<String>,
+    pub category: Option<CategoryPayload>,
+    pub category_sub: Option<CategoryPayload>,
     #[serde(default)]
     pub image: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct CategoryPayload {
+    #[serde(default, deserialize_with = "string_from_any_or_default")]
+    pub title: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,7 +192,17 @@ mod tests {
             "total_views": "1001",
             "likes": true,
             "comment_total": null,
-            "related_list": [{"id": 9, "name": "related"}],
+            "total_photos": "128",
+            "related_list": [{
+                "id": 9,
+                "name": "related",
+                "author": "related-author",
+                "tags": ["related-tag", 1],
+                "works": null,
+                "actors": ["related-actor"],
+                "category": {"title": "category"},
+                "category_sub": {"title": "sub-category"}
+            }],
             "series": [{"id": 10, "name": "chapter", "sort": "1"}]
         }))
         .expect("decode mixed comic detail payload");
@@ -188,7 +214,24 @@ mod tests {
         assert_eq!(detail.total_views, 1001);
         assert_eq!(detail.likes, 1);
         assert_eq!(detail.comment_total, 0);
-        assert_eq!(detail.related_list[0].id, "9");
+        assert_eq!(detail.total_photos, 128);
+        let related = &detail.related_list[0];
+        assert_eq!(related.id, "9");
+        assert_eq!(related.author, vec!["related-author"]);
+        assert_eq!(related.tags, vec!["related-tag", "1"]);
+        assert!(related.works.is_empty());
+        assert_eq!(related.actors, vec!["related-actor"]);
+        assert_eq!(
+            related.category.as_ref().map(|value| value.title.as_str()),
+            Some("category")
+        );
+        assert_eq!(
+            related
+                .category_sub
+                .as_ref()
+                .map(|value| value.title.as_str()),
+            Some("sub-category")
+        );
         assert_eq!(detail.series[0].id, "10");
     }
 }

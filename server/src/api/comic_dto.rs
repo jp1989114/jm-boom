@@ -19,6 +19,7 @@ pub struct ComicDetailResponse {
     total_views: u32,
     likes: u32,
     comment_count: u32,
+    total_photos: u32,
     related_comics: Vec<RelatedComicResponse>,
     chapters: Vec<ComicChapterResponse>,
 }
@@ -29,6 +30,11 @@ struct RelatedComicResponse {
     id: String,
     title: String,
     author: String,
+    authors: Vec<String>,
+    categories: Vec<String>,
+    tags: Vec<String>,
+    works: Vec<String>,
+    actors: Vec<String>,
     image: String,
 }
 
@@ -53,6 +59,7 @@ pub fn map_comic_detail(detail: ComicDetail) -> ComicDetailResponse {
         total_views: detail.total_views,
         likes: detail.likes,
         comment_count: detail.comment_count,
+        total_photos: detail.total_photos,
         related_comics: detail
             .related_comics
             .into_iter()
@@ -63,11 +70,17 @@ pub fn map_comic_detail(detail: ComicDetail) -> ComicDetailResponse {
 }
 
 fn map_related_comic(related: RelatedComic) -> RelatedComicResponse {
+    let authors = normalize_text_list(related.authors);
     RelatedComicResponse {
         image: cover_url(&related.id, &related.image),
         id: related.id,
         title: related.title,
-        author: related.author.trim().to_string(),
+        author: authors.join(" / "),
+        authors,
+        categories: normalize_text_list(related.categories),
+        tags: normalize_text_list(related.tags),
+        works: normalize_text_list(related.works),
+        actors: normalize_text_list(related.actors),
     }
 }
 
@@ -110,10 +123,15 @@ mod tests {
             total_views: 100,
             likes: 20,
             comment_count: 3,
+            total_photos: 128,
             related_comics: vec![RelatedComic {
                 id: "456".into(),
                 title: "Related".into(),
-                author: " Related Author ".into(),
+                authors: vec![" Related Author ".into(), "Related Author".into()],
+                categories: vec![" Category ".into()],
+                tags: vec![" Tag ".into(), "Tag".into(), String::new()],
+                works: vec!["Work".into()],
+                actors: Vec::new(),
                 image: "related.jpg".into(),
             }],
             chapters: vec![ComicChapter {
@@ -138,10 +156,16 @@ mod tests {
                 "totalViews": 100,
                 "likes": 20,
                 "commentCount": 3,
+                "totalPhotos": 128,
                 "relatedComics": [{
                     "id": "456",
                     "title": "Related",
                     "author": "Related Author",
+                    "authors": ["Related Author"],
+                    "categories": ["Category"],
+                    "tags": ["Tag"],
+                    "works": ["Work"],
+                    "actors": [],
                     "image": "/api/covers/456"
                 }],
                 "chapters": [{

@@ -36,6 +36,7 @@ const comic: ComicDetail = {
   totalViews: 0,
   likes: 0,
   commentCount: 0,
+  totalPhotos: 0,
   relatedComics: [],
   chapters: [{ id: '101', title: 'First chapter', sort: '1' }]
 }
@@ -292,6 +293,14 @@ describe('comic detail state', () => {
     expect(queryClient.getQueryData<ComicStateResult>(queryKeys.comicState('100'))).toEqual(
       savedState
     )
+  })
+
+  test('shows the upstream total page count when available', async () => {
+    queryClient.setQueryData(queryKeys.comicDetail('100'), {
+      comic: { ...comic, totalPhotos: 128 }
+    })
+    await render()
+    expect(document.body.textContent).toContain('总页数：128')
   })
 
   test('allows adding a favorite after a confirmed unfavorited response', async () => {
