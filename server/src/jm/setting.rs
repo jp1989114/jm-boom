@@ -43,37 +43,45 @@ impl super::client::JmClient {
     }
 
     pub async fn download_image(&self, url: &str) -> JmResult<Vec<u8>> {
-        let mut response = self
-            .client
-            .get(url)
-            .header("referer", "https://18comic.vip/")
-            .send()
-            .await
-            .map_err(|error| JmError::Network(error.to_string()))?;
-
-        if !response.status().is_success() {
-            return Err(JmError::Http(format!("HTTP {}: {url}", response.status())));
-        }
-
-        let content_length = response.content_length();
-        if let Some(content_length) = content_length {
-            ensure_image_size(content_length, MAX_IMAGE_DOWNLOAD_BYTES)?;
-        }
-        let capacity = content_length
-            .and_then(|length| usize::try_from(length).ok())
-            .unwrap_or_default();
-        let mut data = Vec::with_capacity(capacity);
-
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|error| JmError::Network(error.to_string()))?
-        {
-            append_image_chunk(&mut data, &chunk, MAX_IMAGE_DOWNLOAD_BYTES)?;
-        }
-
-        Ok(data)
+        download_image_bytes(&self.client, url, MAX_IMAGE_DOWNLOAD_BYTES).await
     }
+}
+
+pub(crate) async fn download_image_bytes(
+    client: &reqwest::Client,
+    url: &str,
+    limit: usize,
+) -> JmResult<Vec<u8>> {
+    let mut response = client
+        .get(url)
+        .header("referer", "https://18comic.vip/")
+        .send()
+        .await
+        .map_err(|error| JmError::Network(error.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(JmError::ImageHttp {
+            status: response.status(),
+            url: url.to_string(),
+        });
+    }
+
+    let content_length = response.content_length();
+    if let Some(content_length) = content_length {
+        ensure_image_size(content_length, limit)?;
+    }
+    let capacity = content_length
+        .and_then(|length| usize::try_from(length).ok())
+        .unwrap_or_default();
+    let mut data = Vec::with_capacity(capacity);
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| JmError::Network(error.to_string()))?
+    {
+        append_image_chunk(&mut data, &chunk, limit)?;
+    }
+    Ok(data)
 }
 
 // Probes must reach the server even when a usable image host is already cached.
@@ -125,13 +133,37 @@ async fn fetch_and_cache_img_host(client: &reqwest::Client, endpoint: &str) -> J
             .map_err(|error| JmError::Decode(format!("Invalid setting data: {error}")))?,
     };
 
-    let host = setting.img_host.trim().trim_end_matches('/');
-    if host.is_empty() {
+    let host = normalize_img_host(&setting.img_host)?;
+    insert_cached_img_host(endpoint, host.clone()).await;
+    tracing::debug!(endpoint, img_host = %host, "cached image host");
+    Ok(host)
+}
+
+fn normalize_img_host(value: &str) -> JmResult<String> {
+    let value = value.trim().trim_end_matches('/');
+    if value.is_empty() {
         return Err(JmError::MissingData);
     }
-    insert_cached_img_host(endpoint, host.to_string()).await;
-    tracing::debug!(endpoint, img_host = %host, "cached image host");
-    Ok(host.to_string())
+    let value = if value.contains("://") {
+        value.to_string()
+    } else {
+        format!("https://{value}")
+    };
+    let url = reqwest::Url::parse(&value)
+        .map_err(|error| JmError::Decode(format!("Invalid image host: {error}")))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(JmError::Decode(
+            "Image host must be an HTTP(S) origin".into(),
+        ));
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
 fn append_image_chunk(data: &mut Vec<u8>, chunk: &[u8], limit: usize) -> JmResult<()> {
@@ -198,8 +230,31 @@ async fn insert_cached_img_host(endpoint: &str, host: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_image_chunk, ensure_image_size};
+    use super::{append_image_chunk, ensure_image_size, normalize_img_host};
     use crate::jm::JmError;
+
+    #[test]
+    fn normalizes_image_hosts_without_accepting_paths_or_credentials() {
+        for (input, expected) in [
+            (" images.example/ ", "https://images.example"),
+            ("https://IMAGES.example/", "https://images.example"),
+            ("http://127.0.0.1:1234", "http://127.0.0.1:1234"),
+        ] {
+            assert_eq!(normalize_img_host(input).unwrap(), expected);
+        }
+        for input in [
+            "",
+            " ",
+            "ftp://images.example",
+            "https://images.example/path",
+            "https://images.example?x=1",
+            "https://images.example/#x",
+            "https://user:pass@images.example",
+            "bad host",
+        ] {
+            assert!(normalize_img_host(input).is_err(), "{input}");
+        }
+    }
 
     #[test]
     fn enforces_declared_and_streamed_image_size_limits() {

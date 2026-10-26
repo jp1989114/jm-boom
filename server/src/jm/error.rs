@@ -14,6 +14,9 @@ pub enum JmError {
     #[error("HTTP error: {0}")]
     Http(String),
 
+    #[error("Image HTTP error: {status}: {url}")]
+    ImageHttp { status: StatusCode, url: String },
+
     #[error("API error: {0}")]
     Api(String),
 
@@ -41,14 +44,20 @@ pub enum JmError {
 
 impl JmError {
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Self::Network(_) | Self::Http(_) | Self::Empty)
+        match self {
+            Self::ImageHttp { status, .. } => {
+                status.is_server_error() || matches!(status.as_u16(), 403 | 408 | 429)
+            }
+            _ => matches!(self, Self::Network(_) | Self::Http(_) | Self::Empty),
+        }
     }
 
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::Network(_) | Self::Http(_) | Self::ImageTooLarge { .. } => {
-                StatusCode::BAD_GATEWAY
-            }
+            Self::Network(_)
+            | Self::Http(_)
+            | Self::ImageHttp { .. }
+            | Self::ImageTooLarge { .. } => StatusCode::BAD_GATEWAY,
             Self::Api(_) => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }

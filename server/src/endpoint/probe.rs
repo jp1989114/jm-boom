@@ -3,23 +3,32 @@ use crate::jm::refresh_img_host;
 use reqwest::Client;
 use std::time::Instant;
 
-pub(super) async fn probe_endpoint(client: &Client, endpoint: String) -> EndpointProbe {
+pub(super) async fn probe_endpoint(
+    client: &Client,
+    endpoint: String,
+) -> (EndpointProbe, Option<String>) {
     let started = Instant::now();
     let result = refresh_img_host(client, &endpoint).await;
 
     match result {
-        Ok(_) => EndpointProbe {
-            endpoint,
-            available: true,
-            latency_ms: Some(started.elapsed().as_millis() as u64),
-            error: None,
-        },
-        Err(error) => EndpointProbe {
-            endpoint,
-            available: false,
-            latency_ms: None,
-            error: Some(error.to_string()),
-        },
+        Ok(host) => (
+            EndpointProbe {
+                endpoint,
+                available: true,
+                latency_ms: Some(started.elapsed().as_millis() as u64),
+                error: None,
+            },
+            Some(host),
+        ),
+        Err(error) => (
+            EndpointProbe {
+                endpoint,
+                available: false,
+                latency_ms: None,
+                error: Some(error.to_string()),
+            },
+            None,
+        ),
     }
 }
 
@@ -53,7 +62,7 @@ mod tests {
         ] {
             let (endpoint, server) =
                 serve(Router::new().route("/setting", get(move || async move { body }))).await;
-            let probe = probe_endpoint(&client(), endpoint.clone()).await;
+            let (probe, _) = probe_endpoint(&client(), endpoint.clone()).await;
             server.abort();
             assert!(!probe.available, "accepted {body}");
             assert!(probe.latency_ms.is_none());
@@ -88,7 +97,7 @@ mod tests {
         let mut jm = JmClient::new().unwrap();
         jm.client = http.clone();
         for count in 0..2 {
-            let probe = probe_endpoint(&http, endpoint.clone()).await;
+            let (probe, _) = probe_endpoint(&http, endpoint.clone()).await;
             assert!(probe.available, "{probe:?}");
             assert!(probe.latency_ms.is_some());
             assert!(probe.error.is_none());
@@ -98,7 +107,7 @@ mod tests {
             );
             assert_eq!(requests.load(Ordering::SeqCst), count + 1);
         }
-        let failed = probe_endpoint(&http, endpoint.clone()).await;
+        let (failed, _) = probe_endpoint(&http, endpoint.clone()).await;
         assert!(!failed.available);
         assert_eq!(
             jm.get_img_host(&endpoint).await.unwrap(),
@@ -124,7 +133,7 @@ mod tests {
                     axum::Json(serde_json::json!({ "code": 200, "data": BASE64.encode(encrypted) }))
                 }
             ))).await;
-            let probe = probe_endpoint(&client(), endpoint.clone()).await;
+            let (probe, _) = probe_endpoint(&client(), endpoint.clone()).await;
             server.abort();
             assert!(probe.available, "{seed}: {probe:?}");
             assert_eq!(
@@ -150,7 +159,7 @@ mod tests {
             }),
         ))
         .await;
-        let probe = probe_endpoint(&client(), endpoint).await;
+        let (probe, _) = probe_endpoint(&client(), endpoint).await;
         server.abort();
         assert!(!probe.available);
         assert!(probe.error.unwrap().contains("503"));
@@ -165,9 +174,10 @@ mod tests {
             .timeout(Duration::from_millis(100))
             .build()
             .unwrap();
-        let probe = tokio::time::timeout(Duration::from_secs(2), probe_endpoint(&http, endpoint))
-            .await
-            .unwrap();
+        let (probe, _) =
+            tokio::time::timeout(Duration::from_secs(2), probe_endpoint(&http, endpoint))
+                .await
+                .unwrap();
         server.abort();
         assert!(!probe.available);
         assert!(probe.latency_ms.is_none());

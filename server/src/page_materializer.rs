@@ -3,7 +3,7 @@ use crate::{
     domain::reader::ChapterManifest,
     endpoint::{request_with_failover, EndpointManager},
     image_work::{ImageWorkBudget, ImageWorkPermit, ImageWorkPriority},
-    jm::{invalidate_img_host, JmClient, JmError, JmResult},
+    jm::{JmClient, JmError, JmResult},
     keyed_lock::KeyedLock,
     reader::{needs_decoding, page_name_from_image, prepare_page_image, PageImageFormat},
 };
@@ -308,28 +308,12 @@ impl PageSource for JmPageSource {
         image_path: &'a str,
     ) -> PageSourceFuture<'a, Vec<u8>> {
         Box::pin(async move {
-            let (endpoint, img_host) =
-                request_with_failover(&self.jm, &self.endpoints, |client, endpoint| {
-                    Box::pin(client.get_img_host(endpoint))
-                })
-                .await?;
-            let image_url = format!("{img_host}/media/photos/{chapter_id}/{image_path}");
-
-            match self.jm.download_image(&image_url).await {
-                Ok(data) => Ok(data),
-                Err(error) if error.is_retryable() => {
-                    invalidate_img_host(&endpoint).await;
-                    let (_, refreshed_host) =
-                        request_with_failover(&self.jm, &self.endpoints, |client, endpoint| {
-                            Box::pin(client.get_img_host(endpoint))
-                        })
-                        .await?;
-                    let refreshed_url =
-                        format!("{refreshed_host}/media/photos/{chapter_id}/{image_path}");
-                    self.jm.download_image(&refreshed_url).await
-                }
-                Err(error) => Err(error),
-            }
+            self.endpoints
+                .download_image(
+                    &self.jm,
+                    &format!("/media/photos/{chapter_id}/{image_path}"),
+                )
+                .await
         })
     }
 }

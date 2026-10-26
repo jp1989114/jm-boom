@@ -1,5 +1,6 @@
 mod discovery;
 mod failover;
+mod images;
 mod probe;
 mod repository;
 
@@ -56,6 +57,7 @@ struct EndpointInner {
     selected_endpoint: Option<String>,
     current_endpoint: String,
     endpoints: Vec<EndpointProbe>,
+    image_hosts: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -97,6 +99,7 @@ impl EndpointManager {
                 selected_endpoint,
                 current_endpoint,
                 endpoints,
+                image_hosts: Vec::new(),
             })),
             refresh_lock: Arc::new(Mutex::new(())),
         })
@@ -162,18 +165,26 @@ impl EndpointManager {
         }
 
         let mut probes = Vec::new();
+        let mut image_hosts = Vec::new();
         while let Some(result) = tasks.join_next().await {
-            if let Ok(probe) = result {
+            if let Ok((probe, host)) = result {
                 probes.push(probe);
+                if let Some(host) = host {
+                    if !image_hosts.contains(&host) {
+                        image_hosts.push(host);
+                    }
+                }
             }
         }
         probes.sort_by_key(|probe| probe.latency_ms.unwrap_or(u64::MAX));
-
-        let mut inner = self.inner.write().await;
-        inner.endpoints = probes;
-        inner.probe_completed = true;
-        select_current_endpoint(&mut inner);
-        endpoint_state(&inner)
+        {
+            let mut inner = self.inner.write().await;
+            inner.endpoints = probes;
+            inner.probe_completed = true;
+            select_current_endpoint(&mut inner);
+        }
+        self.refresh_image_hosts(image_hosts).await;
+        self.state().await
     }
 
     pub async fn set_selected(&self, endpoint: Option<String>) -> anyhow::Result<EndpointState> {
@@ -192,7 +203,7 @@ impl EndpointManager {
             };
 
             if !known_available {
-                let probe = probe::probe_endpoint(&self.client, selected.clone()).await;
+                let (probe, _) = probe::probe_endpoint(&self.client, selected.clone()).await;
                 if !probe.available {
                     anyhow::bail!(
                         "Endpoint is unavailable: {}",

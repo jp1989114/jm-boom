@@ -252,10 +252,11 @@ fn test_inner(mode: EndpointMode) -> EndpointInner {
         selected_endpoint: None,
         current_endpoint: FALLBACK_ENDPOINTS[0].to_string(),
         endpoints: Vec::new(),
+        image_hosts: Vec::new(),
     }
 }
 
-async fn test_manager() -> EndpointManager {
+pub(super) async fn test_manager() -> EndpointManager {
     EndpointManager::new(test_db().await)
         .await
         .expect("create endpoint manager")

@@ -10,7 +10,7 @@ mod signature;
 pub use client::JmClient;
 pub(crate) use crypto::decrypt_aes256_ecb;
 pub use error::{JmError, JmResult};
-pub(crate) use setting::{invalidate_img_host, refresh_img_host};
+pub(crate) use setting::{download_image_bytes, invalidate_img_host, refresh_img_host};
 pub(crate) use signature::SettingRequestSignature;
 
 // API constants
