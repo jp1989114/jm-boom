@@ -2,6 +2,33 @@ use super::EndpointProbe;
 use crate::jm::refresh_img_host;
 use reqwest::Client;
 use std::time::Instant;
+use tokio::task::JoinSet;
+
+const API_PROBE_CONCURRENCY: usize = 6;
+
+pub(super) async fn probe_all(
+    client: &Client,
+    candidates: Vec<String>,
+) -> Vec<(EndpointProbe, Option<String>)> {
+    let mut candidates = candidates.into_iter();
+    let mut tasks = JoinSet::new();
+    let mut probes = Vec::new();
+    loop {
+        while tasks.len() < API_PROBE_CONCURRENCY {
+            let Some(endpoint) = candidates.next() else {
+                break;
+            };
+            let client = client.clone();
+            tasks.spawn(async move { probe_endpoint(&client, endpoint).await });
+        }
+        match tasks.join_next().await {
+            Some(Ok(probe)) => probes.push(probe),
+            Some(Err(error)) => tracing::warn!(%error, "endpoint probe task failed"),
+            None => break,
+        }
+    }
+    probes
+}
 
 pub(super) async fn probe_endpoint(
     client: &Client,
@@ -34,7 +61,7 @@ pub(super) async fn probe_endpoint(
 
 #[cfg(test)]
 mod tests {
-    use super::probe_endpoint;
+    use super::{probe_all, probe_endpoint, API_PROBE_CONCURRENCY};
     use crate::jm::{JmClient, API_SECRET, API_VERSION};
     use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyInit};
     use axum::{extract::Query, http::HeaderMap, routing::get, Router};
@@ -190,6 +217,73 @@ mod tests {
             .timeout(Duration::from_secs(2))
             .build()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn probes_every_candidate_with_a_bounded_number_of_active_requests() {
+        let count = API_PROBE_CONCURRENCY + 3;
+        let started = Arc::new(tokio::sync::Semaphore::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (endpoint, server) = serve(Router::new().fallback({
+            let started = started.clone();
+            let release = release.clone();
+            let active = active.clone();
+            let peak = peak.clone();
+            move || {
+                let started = started.clone();
+                let release = release.clone();
+                let active = active.clone();
+                let peak = peak.clone();
+                async move {
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(current, Ordering::SeqCst);
+                    started.add_permits(1);
+                    release.acquire().await.unwrap().forget();
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    axum::Json(serde_json::json!({ "code": 200, "data": { "img_host": "https://images.example" } }))
+                }
+            }
+        })).await;
+        let candidates: Vec<_> = (0..count)
+            .map(|index| format!("{endpoint}/{index}"))
+            .collect();
+        let expected = candidates.clone();
+        let task = tokio::spawn(async move { probe_all(&client(), candidates).await });
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            started.acquire_many(API_PROBE_CONCURRENCY as u32),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+        let exceeded = tokio::time::timeout(Duration::from_millis(100), started.acquire())
+            .await
+            .is_ok();
+        release.add_permits(count);
+        let probes = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        server.abort();
+        assert!(
+            !exceeded,
+            "a seventh request started before a slot was released"
+        );
+        assert!(peak.load(Ordering::SeqCst) <= API_PROBE_CONCURRENCY);
+        assert_eq!(probes.len(), count);
+        let mut actual = probes
+            .into_iter()
+            .map(|(probe, host)| {
+                assert!(probe.available, "{probe:?}");
+                assert_eq!(host.as_deref(), Some("https://images.example"));
+                probe.endpoint
+            })
+            .collect::<Vec<_>>();
+        actual.sort();
+        assert_eq!(actual, expected);
     }
 
     async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {

@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::{Mutex, RwLock},
-    task::JoinSet,
     time::MissedTickBehavior,
 };
 
@@ -157,22 +156,13 @@ impl EndpointManager {
                 candidates.push(selected);
             }
         }
-        let mut tasks = JoinSet::new();
-
-        for endpoint in candidates {
-            let client = self.client.clone();
-            tasks.spawn(async move { probe::probe_endpoint(&client, endpoint).await });
-        }
-
         let mut probes = Vec::new();
         let mut image_hosts = Vec::new();
-        while let Some(result) = tasks.join_next().await {
-            if let Ok((probe, host)) = result {
-                probes.push(probe);
-                if let Some(host) = host {
-                    if !image_hosts.contains(&host) {
-                        image_hosts.push(host);
-                    }
+        for (probe, host) in probe::probe_all(&self.client, candidates).await {
+            probes.push(probe);
+            if let Some(host) = host {
+                if !image_hosts.contains(&host) {
+                    image_hosts.push(host);
                 }
             }
         }
