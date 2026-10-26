@@ -1,4 +1,8 @@
-use super::{media::cover_url, CollectionListQuery, COLLECTION_PAGE_SIZE};
+use super::{
+    media::cover_url,
+    validation::{is_numeric_id, is_positive_page},
+    CollectionListQuery, COLLECTION_PAGE_SIZE,
+};
 use crate::{application::ReadingHistoryInput, http_error::HttpError, AppState};
 use axum::{
     extract::{Path, Query, State},
@@ -129,7 +133,7 @@ fn validate_item(comic_id: &str, input: &ReadingHistoryInput) -> Result<(), Http
 }
 
 fn validate_comic_id(comic_id: &str) -> Result<(), HttpError> {
-    if comic_id.is_empty() || !comic_id.chars().all(|character| character.is_ascii_digit()) {
+    if !is_numeric_id(comic_id) {
         return Err(HttpError::new(
             StatusCode::BAD_REQUEST,
             "漫画 ID 必须为数字",
@@ -140,7 +144,7 @@ fn validate_comic_id(comic_id: &str) -> Result<(), HttpError> {
 }
 
 fn validate_page(page: u32) -> Result<(), HttpError> {
-    if page == 0 {
+    if !is_positive_page(page) {
         return Err(HttpError::new(
             StatusCode::BAD_REQUEST,
             "页码必须大于 0",
@@ -153,4 +157,49 @@ fn validate_page(page: u32) -> Result<(), HttpError> {
 fn internal_error(error: anyhow::Error) -> HttpError {
     tracing::error!(%error, "阅读历史存储操作失败");
     HttpError::internal("阅读历史存储操作失败")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_comic_id, validate_item, validate_page, ReadingHistoryInput};
+    use crate::api::tests::assert_bad_request;
+
+    #[tokio::test]
+    async fn preserves_history_ids_and_distinguishes_list_pages_from_progress() {
+        for id in ["0", "000123", "4294967296"] {
+            assert!(validate_comic_id(id).is_ok());
+        }
+        assert!(validate_page(1).is_ok());
+        assert!(validate_page(u32::MAX).is_ok());
+        assert_bad_request(validate_page(0).unwrap_err(), "页码必须大于 0").await;
+        let mut input = ReadingHistoryInput {
+            title: "Title".into(),
+            author: "Author".into(),
+            image: "cover.jpg".into(),
+            chapter_id: "000123".into(),
+            chapter_title: "Chapter".into(),
+            page_index: 0,
+            page_count: 1,
+            last_read_at: None,
+        };
+        assert!(validate_item("4294967296", &input).is_ok());
+        for (page_index, page_count) in [(-1, 1), (1, 1), (0, 0), (0, -1)] {
+            input.page_index = page_index;
+            input.page_count = page_count;
+            assert_bad_request(
+                validate_item("123", &input).unwrap_err(),
+                "阅读进度页码无效",
+            )
+            .await;
+        }
+        input.page_index = 0;
+        input.page_count = 1;
+        input.chapter_id = "+123".into();
+        assert_bad_request(
+            validate_item("123", &input).unwrap_err(),
+            "漫画 ID 必须为数字",
+        )
+        .await;
+        assert_bad_request(validate_comic_id("").unwrap_err(), "漫画 ID 必须为数字").await;
+    }
 }

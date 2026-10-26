@@ -1,6 +1,6 @@
 # JM Boom 代码审计 Checklist
 
-审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 41 至 43 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 23 项待处理。
+审计日期：2026-10-21。审计对象：当前工作区源码、依赖实现及构建配置。修复进度：第 1 至 12 项、第 14 项、第 16 至 18 项、第 22 至 23 项、第 25 至 27 项、第 41 至 44 项、第 46 项及第 49 项已修复，第 13 项待确认，其余 22 项待处理。
 
 P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明确触发条件的行为、可访问性或资源成本问题；P3 表示可排期的精简与风格整理。未勾选表示尚未修复或仍待确认。路径均为完整绝对路径，冒号后为定位行号。
 
@@ -324,11 +324,13 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
   完整路径：[E:/ppxb/jm-boom/web/src/features/reader/reader-progress-slider.tsx:18](E:/ppxb/jm-boom/web/src/features/reader/reader-progress-slider.tsx:18)。
 
-- [ ] **44 · P3 · API 层的纯数字 ID 和页码校验重复实现**
+- [x] **44 · P3 · API 层的纯数字 ID 和页码校验重复实现（已修复）**
 
-  favorites/history/comics/covers 各有近似数字判断，收藏与历史又重复 page > 0 校验；reader 使用 u32 解析且在入口和 materialize_page 中重复验证。应只共享纯校验/解析函数，保留各模块错误类型、范围需求、文案和日志上下文。
+  已修复：API 层共享非空 ASCII 数字 ID 和正列表页码两个纯判断，收藏、历史、漫画状态、封面接口及封面 URL 映射复用数字判断，收藏和历史复用正页码判断。各模块继续构造原有错误类型、状态码和文案，日志上下文保持原样。普通 ID 继续接受 0、前导零和任意长度数字字符串；阅读器保留独立的 u32 解析范围及前导 + 行为。删除 get_page 入口的重复解析，HTTP 图片请求和后台预热统一在 materialize_page 读取数据前校验；manifest 入口校验继续保留。阅读进度仍按 0 起始索引校验，没有套用列表页码规则。
 
-  完整路径：[E:/ppxb/jm-boom/server/src/api/favorites.rs:91](E:/ppxb/jm-boom/server/src/api/favorites.rs:91)；[E:/ppxb/jm-boom/server/src/api/history.rs:121](E:/ppxb/jm-boom/server/src/api/history.rs:121)；[E:/ppxb/jm-boom/server/src/api/comics.rs:128](E:/ppxb/jm-boom/server/src/api/comics.rs:128)；[E:/ppxb/jm-boom/server/src/api/covers.rs:22](E:/ppxb/jm-boom/server/src/api/covers.rs:22)；[E:/ppxb/jm-boom/server/src/api/reader.rs:84](E:/ppxb/jm-boom/server/src/api/reader.rs:84)；[E:/ppxb/jm-boom/server/src/api/reader.rs:218](E:/ppxb/jm-boom/server/src/api/reader.rs:218)。
+  验证：6 个新增边界及错误响应测试和扩展后的封面 ID 测试覆盖空值、非 ASCII 数字、符号/空白、小数、前导零、超出 u32 的数字字符串、阅读器范围、1 起始分页与 0 起始进度，以及 HTTP 400、原有中英文文案和 retryable: false。收尾复核确认各调用点均复用共享判断，阅读器在读取缓存、离线文件或请求上游前完成校验；后端全量 119 个常规测试、格式检查和 Clippy 通过。
+
+  完整路径：[E:/ppxb/jm-boom/server/src/api/validation.rs:2](E:/ppxb/jm-boom/server/src/api/validation.rs:2)；[E:/ppxb/jm-boom/server/src/api/validation.rs:7](E:/ppxb/jm-boom/server/src/api/validation.rs:7)；[E:/ppxb/jm-boom/server/src/api/favorites.rs:96](E:/ppxb/jm-boom/server/src/api/favorites.rs:96)；[E:/ppxb/jm-boom/server/src/api/history.rs:135](E:/ppxb/jm-boom/server/src/api/history.rs:135)；[E:/ppxb/jm-boom/server/src/api/comics.rs:129](E:/ppxb/jm-boom/server/src/api/comics.rs:129)；[E:/ppxb/jm-boom/server/src/api/covers.rs:22](E:/ppxb/jm-boom/server/src/api/covers.rs:22)；[E:/ppxb/jm-boom/server/src/api/reader.rs:100](E:/ppxb/jm-boom/server/src/api/reader.rs:100)。
 
 - [ ] **45 · P3 · 响应信封使用了不参与数据结构的伪泛型**
 
@@ -387,7 +389,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 ## 已执行验证
 
-第 43 项修复后重新执行了前端测试、类型检查、lint、格式检查、构建与 diff 检查。本次未改动后端，以下后端结果沿用第 49 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
+2026-10-26 完成第 44 项收尾复核，重新执行了后端测试、格式检查、Clippy 与 diff 检查。本次未改动前端，以下前端结果沿用第 43 项修复后的验证记录；缓存延迟测量沿用第 26 项结果。
 
 | 命令 | 结果 |
 | --- | --- |
@@ -396,7 +398,7 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 | web：bun run fmt:check | 未通过：仍有 100 个未修改文件被报告；本次修改的 reader-progress-slider.tsx 单独检查通过。 |
 | web：bun run build | 通过 |
 | web：bun test | 103 个通过、18 个失败；失败用例与变更前逐条一致，仍涉及账号、端点和每周页面，错误为测试环境缺少 HTMLFormElement。 |
-| server：cargo test --locked | 113 个测试通过，历史测试已补充第 49 项的迟到进度与相同时间戳边界；1 个磁盘延迟测量默认忽略 |
+| server：cargo test --locked | 119 个测试通过，包含第 44 项新增的 6 个 API 校验边界及错误响应测试；1 个磁盘延迟测量默认忽略 |
 | server：近容量缓存延迟测量（--ignored --nocapture） | 第 26 项单独运行通过，本次未重复测量；条件、结果和完整命令见第 26 项 |
 | server：cargo fmt --check | 通过 |
 | server：cargo clippy --locked -- -D warnings | 通过 |
@@ -412,4 +414,4 @@ P1 表示优先处理的故障切换或数据一致性风险；P2 表示有明�
 
 没有规模或测量证据时，不将下载列表 clone、1 秒轮询或 Zustand 的独立 selector 认定为必须重写的性能问题，也不建议改为 SSE。字体构建输出包含 unicode-range 分片，不能把全部字体文件体积直接等同首屏下载量。
 
-共 50 条审计记录，其中 26 条已修复、1 条待确认、23 条待处理；原生控件补充、验证记录和优化边界不计入条数。
+共 50 条审计记录，其中 27 条已修复、1 条待确认、22 条待处理；原生控件补充、验证记录和优化边界不计入条数。

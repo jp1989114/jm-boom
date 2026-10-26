@@ -84,7 +84,6 @@ pub async fn get_page(
     Path((chapter_id, page)): Path<(String, u32)>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    validate_chapter_id(&chapter_id)?;
     let priority = request_priority(&headers);
     let image = materialize_page(&app, &chapter_id, page, priority).await?;
     if should_expand_prewarm_window(priority) {
@@ -105,6 +104,7 @@ async fn materialize_page(
     priority: ImageWorkPriority,
 ) -> Result<MaterializedImage, ApiError> {
     let materialize_started = Instant::now();
+    // HTTP requests and background prewarm jobs both pass this check before reading data.
     let comic_id = validate_chapter_id(chapter_id)?;
 
     if let Some(cached) = app
@@ -272,13 +272,35 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_manifest_data, should_expand_prewarm_window, ApiError};
+    use super::{
+        resolve_manifest_data, should_expand_prewarm_window, validate_chapter_id, ApiError,
+    };
+    use crate::api::tests::assert_bad_request;
     use crate::{domain::reader::ChapterManifest, image_work::ImageWorkPriority, jm::JmError};
 
     #[test]
     fn prefetch_requests_do_not_expand_the_server_prewarm_window() {
         assert!(should_expand_prewarm_window(ImageWorkPriority::Foreground));
         assert!(!should_expand_prewarm_window(ImageWorkPriority::Prefetch));
+    }
+
+    #[tokio::test]
+    async fn preserves_the_readers_bounded_integer_parser() {
+        for (id, expected) in [
+            ("0", 0),
+            ("000123", 123),
+            ("+123", 123),
+            ("4294967295", u32::MAX),
+        ] {
+            assert_eq!(validate_chapter_id(id).unwrap(), expected);
+        }
+        for id in ["", "-1", "4294967296", "1.0", "１２", " 1", "1 "] {
+            assert_bad_request(
+                validate_chapter_id(id).unwrap_err(),
+                "Chapter id must be numeric",
+            )
+            .await;
+        }
     }
 
     #[test]

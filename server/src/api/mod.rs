@@ -30,6 +30,7 @@ mod media;
 mod reader;
 mod search;
 mod settings;
+mod validation;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -81,4 +82,19 @@ pub fn routes() -> Router<AppState> {
                 .put(settings::update_account)
                 .delete(settings::clear_account),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{body::to_bytes, http::StatusCode, response::IntoResponse};
+
+    pub(super) async fn assert_bad_request(error: impl IntoResponse, message: &str) {
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({"error": message, "retryable": false})
+        );
+    }
 }

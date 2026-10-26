@@ -1,4 +1,8 @@
-use super::{media::cover_url, CollectionListQuery, COLLECTION_PAGE_SIZE};
+use super::{
+    media::cover_url,
+    validation::{is_numeric_id, is_positive_page},
+    CollectionListQuery, COLLECTION_PAGE_SIZE,
+};
 use crate::{application::FavoriteInput, http_error::HttpError, AppState};
 use axum::{
     extract::{Path, Query, State},
@@ -90,7 +94,7 @@ impl From<crate::application::FavoriteItem> for FavoriteResponse {
 }
 
 fn validate_comic_id(comic_id: &str) -> Result<(), HttpError> {
-    if comic_id.is_empty() || !comic_id.chars().all(|character| character.is_ascii_digit()) {
+    if !is_numeric_id(comic_id) {
         return Err(HttpError::new(
             StatusCode::BAD_REQUEST,
             "收藏漫画 ID 必须为数字",
@@ -101,7 +105,7 @@ fn validate_comic_id(comic_id: &str) -> Result<(), HttpError> {
 }
 
 fn validate_page(page: u32) -> Result<(), HttpError> {
-    if page == 0 {
+    if !is_positive_page(page) {
         return Err(HttpError::new(
             StatusCode::BAD_REQUEST,
             "页码必须大于 0",
@@ -114,4 +118,25 @@ fn validate_page(page: u32) -> Result<(), HttpError> {
 fn internal_error(error: anyhow::Error) -> HttpError {
     tracing::error!(%error, "收藏存储操作失败");
     HttpError::internal("收藏存储操作失败")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_comic_id, validate_page};
+    use crate::api::tests::assert_bad_request;
+
+    #[tokio::test]
+    async fn preserves_favorite_id_and_list_page_validation() {
+        for id in ["0", "000123", "4294967296"] {
+            assert!(validate_comic_id(id).is_ok());
+        }
+        assert!(validate_page(1).is_ok());
+        assert!(validate_page(u32::MAX).is_ok());
+        assert_bad_request(
+            validate_comic_id("１２").unwrap_err(),
+            "收藏漫画 ID 必须为数字",
+        )
+        .await;
+        assert_bad_request(validate_page(0).unwrap_err(), "页码必须大于 0").await;
+    }
 }

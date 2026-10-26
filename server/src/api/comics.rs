@@ -1,3 +1,4 @@
+use super::validation::is_numeric_id;
 use crate::{
     api::comic_dto::{map_comic_detail, ComicDetailResponse},
     api::history::ReadingHistoryResponse,
@@ -126,7 +127,7 @@ fn default_page() -> u32 {
 }
 
 fn validate_comic_id(comic_id: &str) -> Result<(), HttpError> {
-    if comic_id.is_empty() || !comic_id.chars().all(|character| character.is_ascii_digit()) {
+    if !is_numeric_id(comic_id) {
         return Err(HttpError::new(
             StatusCode::BAD_REQUEST,
             "漫画 ID 必须为数字",
@@ -139,4 +140,18 @@ fn validate_comic_id(comic_id: &str) -> Result<(), HttpError> {
 fn state_error(error: anyhow::Error) -> HttpError {
     tracing::error!(%error, "漫画状态查询失败");
     HttpError::internal("漫画状态查询失败")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_comic_id;
+    use crate::api::tests::assert_bad_request;
+
+    #[tokio::test]
+    async fn preserves_comic_state_id_validation() {
+        for id in ["0", "000123", "4294967296"] {
+            assert!(validate_comic_id(id).is_ok());
+        }
+        assert_bad_request(validate_comic_id("+1").unwrap_err(), "漫画 ID 必须为数字").await;
+    }
 }

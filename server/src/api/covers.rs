@@ -1,3 +1,4 @@
+use super::validation::is_numeric_id;
 use crate::application::CoverServiceError;
 use crate::http_error::HttpError;
 use crate::AppState;
@@ -19,7 +20,7 @@ pub async fn get_cover(
 }
 
 fn validate_comic_id(comic_id: &str) -> Result<(), CoverError> {
-    if comic_id.is_empty() || !comic_id.chars().all(|character| character.is_ascii_digit()) {
+    if !is_numeric_id(comic_id) {
         return Err(CoverError::BadRequest("Comic id must be numeric".into()));
     }
 
@@ -85,11 +86,36 @@ impl IntoResponse for CoverError {
 #[cfg(test)]
 mod tests {
     use super::validate_comic_id;
+    use crate::api::tests::assert_bad_request;
 
     #[test]
     fn validates_numeric_comic_ids() {
-        assert!(validate_comic_id("1444583").is_ok());
-        assert!(validate_comic_id("").is_err());
-        assert!(validate_comic_id("../1444583").is_err());
+        for id in ["0", "000123", "1444583", "4294967296"] {
+            assert!(validate_comic_id(id).is_ok(), "{id}");
+        }
+        assert!(validate_comic_id(&"9".repeat(128)).is_ok());
+        for id in [
+            "",
+            "../1444583",
+            "-1",
+            "+1",
+            " 1",
+            "1 ",
+            "1.0",
+            "1e3",
+            "１２",
+            "١٢",
+        ] {
+            assert!(validate_comic_id(id).is_err(), "{id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn preserves_the_cover_validation_error() {
+        assert_bad_request(
+            validate_comic_id("+1").unwrap_err(),
+            "Comic id must be numeric",
+        )
+        .await;
     }
 }
