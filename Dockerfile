@@ -30,7 +30,7 @@ RUN bun run build
 
 FROM debian:bookworm-slim AS runtime
 
-ARG VERSION=0.7.0
+ARG VERSION=0.7.1
 ARG REVISION=unknown
 
 LABEL org.opencontainers.image.title="JM Boom" \
