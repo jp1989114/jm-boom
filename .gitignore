@@ -36,6 +36,7 @@ dist-ssr
 # Web
 /web/node_modules
 /web/dist
+/web/pnpm-lock.yaml
 
 # Data
 data/
