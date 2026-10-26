@@ -82,15 +82,79 @@ impl ComicService {
 
 fn search_result(page: u32, total: u32, items: Vec<ComicSummary>) -> ComicSearch {
     let pages = total.div_ceil(SEARCH_PAGE_SIZE);
+    let item_count = items.len() as u32;
+    // Upstream may omit the total; fall back to the current page length so a
+    // full page does not look like the last one.
+    let loaded_count = u64::from(page.saturating_sub(1))
+        .saturating_mul(u64::from(SEARCH_PAGE_SIZE))
+        .saturating_add(u64::from(item_count));
+    let has_reached_max =
+        item_count < SEARCH_PAGE_SIZE || (total > 0 && loaded_count >= u64::from(total));
     ComicSearch {
         page,
         pages,
         total,
-        has_reached_max: page >= pages,
+        has_reached_max,
         items,
     }
 }
 
 fn is_comic_id(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|character| character.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{search_result, SEARCH_PAGE_SIZE};
+    use crate::domain::comic::ComicSummary;
+
+    #[test]
+    fn keeps_a_full_page_open_when_upstream_omits_the_total() {
+        let result = search_result(1, 0, comics(SEARCH_PAGE_SIZE as usize));
+        assert!(!result.has_reached_max);
+    }
+
+    #[test]
+    fn stops_on_a_short_page_when_upstream_omits_the_total() {
+        let result = search_result(1, 0, comics(SEARCH_PAGE_SIZE as usize - 1));
+        assert!(result.has_reached_max);
+    }
+
+    #[test]
+    fn stops_on_an_empty_page() {
+        let result = search_result(1, 0, Vec::new());
+        assert!(result.has_reached_max);
+    }
+
+    #[test]
+    fn uses_the_total_when_it_is_available() {
+        let first = search_result(1, 81, comics(SEARCH_PAGE_SIZE as usize));
+        assert_eq!(first.pages, 2);
+        assert!(!first.has_reached_max);
+
+        let last = search_result(2, 81, comics(1));
+        assert_eq!(last.pages, 2);
+        assert!(last.has_reached_max);
+    }
+
+    #[test]
+    fn large_page_numbers_do_not_overflow_the_loaded_count() {
+        let result = search_result(u32::MAX, u32::MAX, comics(SEARCH_PAGE_SIZE as usize));
+        assert!(result.has_reached_max);
+    }
+
+    fn comics(count: usize) -> Vec<ComicSummary> {
+        (0..count)
+            .map(|index| {
+                ComicSummary::new(
+                    index.to_string(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    Vec::new(),
+                )
+            })
+            .collect()
+    }
 }
