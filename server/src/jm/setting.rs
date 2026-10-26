@@ -39,61 +39,7 @@ impl super::client::JmClient {
             return Ok(host);
         }
 
-        let host = self.fetch_img_host(endpoint).await?;
-        insert_cached_img_host(endpoint, host.clone()).await;
-        tracing::debug!(endpoint, img_host = %host, "cached image host");
-        Ok(host)
-    }
-
-    async fn fetch_img_host(&self, endpoint: &str) -> JmResult<String> {
-        let signature = SettingRequestSignature::current();
-        let url = format!("{endpoint}/setting");
-        let response = self
-            .client
-            .get(&url)
-            .header("accept", "application/json")
-            .header("token", &signature.token)
-            .header("tokenparam", &signature.tokenparam)
-            .query(&[("app_img_shunt", "1"), ("t", signature.ts.as_str())])
-            .send()
-            .await
-            .map_err(|error| JmError::Network(error.to_string()))?;
-
-        if !response.status().is_success() {
-            return Err(JmError::Http(format!("HTTP {}: {url}", response.status())));
-        }
-
-        let body = response
-            .text()
-            .await
-            .map_err(|error| JmError::Network(error.to_string()))?;
-        let envelope: SettingResponse = serde_json::from_str(&body)
-            .map_err(|error| JmError::Decode(format!("Invalid setting response: {error}")))?;
-
-        if envelope.code != 200 {
-            return Err(JmError::Api(
-                envelope
-                    .error_msg
-                    .unwrap_or_else(|| format!("API code {}", envelope.code)),
-            ));
-        }
-
-        let value = envelope.data.ok_or(JmError::MissingData)?;
-        let setting = match value {
-            serde_json::Value::String(encrypted) => {
-                let decrypted = decrypt_setting_data(&encrypted, &signature.ts)?;
-                serde_json::from_str::<SettingData>(&decrypted)
-                    .map_err(|error| JmError::Decode(format!("Invalid setting data: {error}")))?
-            }
-            value => serde_json::from_value::<SettingData>(value)
-                .map_err(|error| JmError::Decode(format!("Invalid setting data: {error}")))?,
-        };
-
-        let host = setting.img_host.trim().trim_end_matches('/');
-        if host.is_empty() {
-            return Err(JmError::MissingData);
-        }
-        Ok(host.to_string())
+        fetch_and_cache_img_host(&self.client, endpoint).await
     }
 
     pub async fn download_image(&self, url: &str) -> JmResult<Vec<u8>> {
@@ -128,6 +74,64 @@ impl super::client::JmClient {
 
         Ok(data)
     }
+}
+
+// Probes must reach the server even when a usable image host is already cached.
+pub(crate) async fn refresh_img_host(client: &reqwest::Client, endpoint: &str) -> JmResult<String> {
+    let _guard = IMG_HOST_FETCH_LOCKS.lock(endpoint).await;
+    fetch_and_cache_img_host(client, endpoint).await
+}
+
+async fn fetch_and_cache_img_host(client: &reqwest::Client, endpoint: &str) -> JmResult<String> {
+    let signature = SettingRequestSignature::current();
+    let url = format!("{endpoint}/setting");
+    let response = client
+        .get(&url)
+        .header("accept", "application/json")
+        .header("token", &signature.token)
+        .header("tokenparam", &signature.tokenparam)
+        .query(&[("app_img_shunt", "1"), ("t", signature.ts.as_str())])
+        .send()
+        .await
+        .map_err(|error| JmError::Network(error.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(JmError::Http(format!("HTTP {}: {url}", response.status())));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|error| JmError::Network(error.to_string()))?;
+    let envelope: SettingResponse = serde_json::from_str(&body)
+        .map_err(|error| JmError::Decode(format!("Invalid setting response: {error}")))?;
+
+    if envelope.code != 200 {
+        return Err(JmError::Api(
+            envelope
+                .error_msg
+                .unwrap_or_else(|| format!("API code {}", envelope.code)),
+        ));
+    }
+
+    let value = envelope.data.ok_or(JmError::MissingData)?;
+    let setting = match value {
+        serde_json::Value::String(encrypted) => {
+            let decrypted = decrypt_setting_data(&encrypted, &signature.ts)?;
+            serde_json::from_str::<SettingData>(&decrypted)
+                .map_err(|error| JmError::Decode(format!("Invalid setting data: {error}")))?
+        }
+        value => serde_json::from_value::<SettingData>(value)
+            .map_err(|error| JmError::Decode(format!("Invalid setting data: {error}")))?,
+    };
+
+    let host = setting.img_host.trim().trim_end_matches('/');
+    if host.is_empty() {
+        return Err(JmError::MissingData);
+    }
+    insert_cached_img_host(endpoint, host.to_string()).await;
+    tracing::debug!(endpoint, img_host = %host, "cached image host");
+    Ok(host.to_string())
 }
 
 fn append_image_chunk(data: &mut Vec<u8>, chunk: &[u8], limit: usize) -> JmResult<()> {
